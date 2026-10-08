@@ -42,11 +42,10 @@ public sealed class HairReferenceAnalysisService
             else
                 mask.CopyTo(resizedMask);
 
-            var points = Cv2.FindNonZero(resizedMask);
-            if (points is null || points.Length < 20)
+            if (Cv2.CountNonZero(resizedMask) < 20)
                 return "use the selected reference for overall haircut silhouette";
 
-            var rect = Cv2.BoundingRect(points);
+            var rect = Cv2.BoundingRect(resizedMask);
             var verticalRatio = rect.Height / (double)Math.Max(source.Height, 1);
             var length = verticalRatio switch
             {
