@@ -44,9 +44,7 @@ public sealed class MakeupService : IDisposable
         if (_disposed || !Ready || !settings.Enabled || frame.Empty())
             return;
 
-        _frameCounter++;
-        if (_frameCounter % 4 == 1 || _lastFace is null)
-            Detect(frame);
+        UpdateTracking(frame);
 
         Rect face;
         Rect[] eyes;
@@ -72,6 +70,27 @@ public sealed class MakeupService : IDisposable
 
         if (settings.Lipstick)
             DrawLipstick(frame, face, mouth, ParseHex(settings.LipColor), intensity, settings.LipFinish);
+    }
+
+    public void Track(Mat frame)
+    {
+        if (_disposed || !Ready || frame.Empty())
+            return;
+
+        UpdateTracking(frame);
+    }
+
+    public Rect? GetTrackedFaceRect()
+    {
+        lock (_stateGate)
+            return _lastFace;
+    }
+
+    private void UpdateTracking(Mat frame)
+    {
+        _frameCounter++;
+        if (_frameCounter % 4 == 1 || _lastFace is null)
+            Detect(frame);
     }
 
     public FaceAnalysisSnapshot? GetAnalysisSnapshot()
