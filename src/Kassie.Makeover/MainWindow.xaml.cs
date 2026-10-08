@@ -396,7 +396,7 @@ public partial class MainWindow : System.Windows.Window
         var dialog = new OpenFileDialog
         {
             Title = "Add clothing photos to Kassie Wardrobe",
-            Filter = "Image files|*.jpg;*.jpeg;*.png;*.webp;*.bmp",
+            Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp",
             Multiselect = true
         };
 
