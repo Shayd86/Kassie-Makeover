@@ -63,14 +63,15 @@ public sealed class HairSegmentationService : IDisposable
 
         var logits = results.First().AsTensor<float>();
 
-        if (logits.Dimensions.Count != 4 ||
-            logits.Dimensions[0] != 1 ||
-            logits.Dimensions[1] != 256 ||
-            logits.Dimensions[2] != 256 ||
-            logits.Dimensions[3] < 6)
+        var outputShape = logits.Dimensions.ToArray();
+        if (outputShape.Length != 4 ||
+            outputShape[0] != 1 ||
+            outputShape[1] != 256 ||
+            outputShape[2] != 256 ||
+            outputShape[3] < 6)
         {
             throw new InvalidOperationException(
-                $"Unexpected hair-segmentation output shape: [{string.Join(", ", logits.Dimensions)}].");
+                $"Unexpected hair-segmentation output shape: [{string.Join(", ", outputShape)}].");
         }
         using var hair = new Mat(256, 256, MatType.CV_8UC1, Scalar.Black);
         using var face = new Mat(256, 256, MatType.CV_8UC1, Scalar.Black);
