@@ -41,10 +41,14 @@ public sealed class HairGenerationService
         try
         {
             progress?.Report("Preparing portrait for local AI…");
-            var size = PrepareWorkingImage(request.SourcePath, workingSource);
+            var size = await Task.Run(
+                () => PrepareWorkingImage(request.SourcePath, workingSource),
+                cancellationToken);
 
             progress?.Report("Finding the real hair and face regions…");
-            _segmentation.CreateEditMask(workingSource, request.Settings, maskPath);
+            await Task.Run(
+                () => _segmentation.CreateEditMask(workingSource, request.Settings, maskPath),
+                cancellationToken);
 
             progress?.Report("Generating hairstyle locally • GPU first…");
 
