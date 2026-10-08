@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -48,8 +49,9 @@ public sealed class HairGenerationService
 
         await AddImageAsync(form, request.SourcePath, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(request.ReferencePath) && File.Exists(request.ReferencePath))
-            await AddImageAsync(form, request.ReferencePath, cancellationToken);
+        var referencePath = request.ReferencePath;
+        if (!string.IsNullOrWhiteSpace(referencePath) && File.Exists(referencePath))
+            await AddImageAsync(form, referencePath, cancellationToken);
 
         using var message = new HttpRequestMessage(HttpMethod.Post, Endpoint)
         {
