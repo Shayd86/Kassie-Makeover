@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout
@@ -112,3 +112,23 @@ jobs:
             Kassie-Makeover-v${{ steps.version.outputs.version }}-Source.zip
             publish/Kassie-Makeover.exe
             publish/kassie-release.json
+
+      - name: Publish GitHub release downloads
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          $tag = "v$v"
+          $files = @(
+            "Kassie-Makeover-Setup-v$v.exe",
+            "Kassie-Makeover-v$v.zip",
+            "Kassie-Makeover-v$v-Source.zip",
+            "publish\Kassie-Makeover.exe"
+          )
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag @files --repo "${{ github.repository }}" --title "Kassie Makeover v$v" --notes "C# / WPF Windows x64 build. Standalone installer installs to F:\Kassie Makeover. Hub update ZIP follows the Kassie Hub release contract."
+          } else {
+            gh release upload $tag @files --repo "${{ github.repository }}" --clobber
+          }
