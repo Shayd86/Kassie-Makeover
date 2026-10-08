@@ -368,7 +368,7 @@ public sealed class MakeupService : IDisposable
         var roi = Clamp(new Rect(center.X - padX, center.Y - padY, padX * 2, padY * 2), frame.Width, frame.Height);
 
         using var target = new Mat(frame, roi);
-        using var mask = Mat.Zeros(target.Rows, target.Cols, MatType.CV_8UC1);
+        using var mask = new Mat(target.Rows, target.Cols, MatType.CV_8UC1, Scalar.Black);
         var localCenter = new Point(center.X - roi.X, center.Y - roi.Y);
 
         Cv2.Ellipse(mask, localCenter, axes, angle, 0, 360, Scalar.White, -1, LineTypes.AntiAlias);
