@@ -54,11 +54,13 @@ public partial class MainWindow : System.Windows.Window
     private readonly CameraService _camera = new();
     private readonly ModelAssetService _modelAssets = new();
     private readonly MakeupService _makeup = new();
+    private readonly MakeupAdvisorService _advisor = new();
     private readonly LookPresetService _lookService = new();
     private readonly WardrobeService _wardrobeService = new();
 
     private WriteableBitmap? _previewBitmap;
     private MakeupSettings _makeupSettings = new();
+    private MakeupRecommendation? _lastRecommendation;
     private List<LookPreset> _looks = [];
     private List<WardrobeItem> _wardrobe = [];
     private string _activePage = "Live Mirror";
@@ -73,9 +75,18 @@ public partial class MainWindow : System.Windows.Window
         LipColorCombo.ItemsSource = LipColors;
         BlushColorCombo.ItemsSource = BlushColors;
         EyeColorCombo.ItemsSource = EyeColors;
+        LipFinishCombo.ItemsSource = new[] { "Tint", "Satin", "Matte", "Gloss" };
+        BlushPlacementCombo.ItemsSource = new[] { "Lifted", "Apples", "Sun-kissed" };
+        EyeStyleCombo.ItemsSource = new[] { "Soft wash", "Soft smoky", "Outer lift" };
+        StyleVibeCombo.ItemsSource = new[] { "Everyday", "Soft glam", "Evening", "Bold" };
+
         LipColorCombo.SelectedIndex = 0;
         BlushColorCombo.SelectedIndex = 0;
         EyeColorCombo.SelectedIndex = 0;
+        LipFinishCombo.SelectedItem = "Satin";
+        BlushPlacementCombo.SelectedItem = "Lifted";
+        EyeStyleCombo.SelectedItem = "Soft wash";
+        StyleVibeCombo.SelectedItem = "Everyday";
 
         _camera.FrameProcessor = ProcessFrame;
         _camera.FrameReady += Camera_FrameReady;
@@ -254,7 +265,10 @@ public partial class MainWindow : System.Windows.Window
             Intensity = (int)Math.Round(MakeupIntensitySlider.Value),
             LipColor = lip.Hex,
             BlushColor = blush.Hex,
-            EyeColor = eye.Hex
+            EyeColor = eye.Hex,
+            LipFinish = LipFinishCombo.SelectedItem as string ?? "Satin",
+            BlushPlacement = BlushPlacementCombo.SelectedItem as string ?? "Lifted",
+            EyeStyle = EyeStyleCombo.SelectedItem as string ?? "Soft wash"
         };
 
         MakeupIntensityText.Text = $"{_makeupSettings.Intensity}%";
@@ -274,6 +288,9 @@ public partial class MainWindow : System.Windows.Window
             LipColorCombo.SelectedItem = LipColors.FirstOrDefault(x => x.Hex == settings.LipColor) ?? LipColors[0];
             BlushColorCombo.SelectedItem = BlushColors.FirstOrDefault(x => x.Hex == settings.BlushColor) ?? BlushColors[0];
             EyeColorCombo.SelectedItem = EyeColors.FirstOrDefault(x => x.Hex == settings.EyeColor) ?? EyeColors[0];
+            LipFinishCombo.SelectedItem = settings.LipFinish;
+            BlushPlacementCombo.SelectedItem = settings.BlushPlacement;
+            EyeStyleCombo.SelectedItem = settings.EyeStyle;
         }
         finally
         {
@@ -350,6 +367,71 @@ public partial class MainWindow : System.Windows.Window
     }
 
     private void MakeupControl_Changed(object sender, RoutedEventArgs e) => UpdateMakeupSettings();
+
+    private void MakeupMode_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string mode) return;
+
+        var styleMode = mode == "StyleMe";
+        TryOnPanel.Visibility = styleMode ? Visibility.Collapsed : Visibility.Visible;
+        StyleAdvisorPanel.Visibility = styleMode ? Visibility.Visible : Visibility.Collapsed;
+        MakeupModeHint.Text = styleMode
+            ? "STYLE ME • Face-aware suggestions with your chosen vibe."
+            : "TRY ON • Choose shades, finishes and placement.";
+        MakeupModeHint.Foreground = (Brush)FindResource(styleMode ? "PinkBrush" : "CyanBrush");
+    }
+
+    private async void AnalyseFace_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_camera.IsRunning)
+        {
+            await StartSelectedCameraAsync();
+            if (!_camera.IsRunning)
+            {
+                FaceAnalysisText.Text = "I need a live camera image before I can analyse anything.";
+                return;
+            }
+        }
+
+        await EnsureMakeupReadyAsync();
+
+        var analysis = _makeup.GetAnalysisSnapshot();
+        if (analysis is null)
+        {
+            FaceAnalysisText.Text = "I cannot get a stable face read yet. Face the camera fairly straight-on with your whole face visible, then try again.";
+            ApplyRecommendationButton.IsEnabled = false;
+            return;
+        }
+
+        FaceAnalysisText.Text =
+            $"Face: {analysis.FaceShape}\n" +
+            $"Eyes: {analysis.EyeSpacing}\n" +
+            $"Features: {analysis.FeatureBalance}\n" +
+            $"{analysis.ConfidenceNote}";
+
+        var vibe = StyleVibeCombo.SelectedItem as string ?? "Everyday";
+        _lastRecommendation = _advisor.Recommend(analysis, vibe);
+
+        RecommendationTitle.Text = _lastRecommendation.Title;
+        RecommendationSummary.Text = _lastRecommendation.Summary;
+        RecommendationWhy.Text = _lastRecommendation.Why;
+        ApplyRecommendationButton.IsEnabled = true;
+        GlobalStatus.Text = "Style suggestion ready";
+    }
+
+    private async void ApplyRecommendation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_lastRecommendation is null) return;
+
+        ApplyMakeupSettingsToUi(_lastRecommendation.Settings);
+        TryOnPanel.Visibility = Visibility.Visible;
+        StyleAdvisorPanel.Visibility = Visibility.Collapsed;
+        MakeupModeHint.Text = "TRY ON • Kassie’s suggestion is now live.";
+        MakeupModeHint.Foreground = (Brush)FindResource("CyanBrush");
+
+        await EnsureMakeupReadyAsync();
+        GlobalStatus.Text = $"Trying {_lastRecommendation.Title}";
+    }
 
     private void SaveLook_Click(object sender, RoutedEventArgs e)
     {
@@ -469,7 +551,7 @@ public partial class MainWindow : System.Windows.Window
                 PageSubtitle.Text = "Your starting point for every look.";
                 break;
             case "Makeup":
-                PageSubtitle.Text = "Live lipstick, blush and eyeshadow preview.";
+                PageSubtitle.Text = "Try makeup live, or get face-aware style suggestions.";
                 break;
             case "Looks":
                 PageSubtitle.Text = "Save and reload complete looks.";
