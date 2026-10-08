@@ -470,7 +470,15 @@
                                         <StackPanel>
                                             <TextBlock Text="4. Local AI engine" FontSize="16" FontWeight="Bold"/>
                                             <TextBlock Text="No API key. No subscription. No per-image charge. First use downloads a lightweight Windows AI runtime, a quantized hairstyle model (about 1.6 GB), and a small hair-segmentation model to D:\Kassie\Makeover." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
-                                            <Button x:Name="PrepareLocalAiButton" Content="Prepare local AI" Style="{StaticResource ActionButton}" Click="PrepareLocalAi_Click"/>
+                                            <WrapPanel Margin="-4,0">
+                                                <Button x:Name="PrepareLocalAiButton" Content="Prepare local AI" Style="{StaticResource ActionButton}" Click="PrepareLocalAi_Click"/>
+                                                <Button Content="Recheck" Style="{StaticResource ActionButton}" Click="RecheckLocalAi_Click"/>
+                                            </WrapPanel>
+                                            <WrapPanel Margin="-4,6,0,0">
+                                                <Button Content="Models" Tag="Models" Style="{StaticResource ActionButton}" Click="OpenLocalAiFolder_Click"/>
+                                                <Button Content="Runtime" Tag="Runtime" Style="{StaticResource ActionButton}" Click="OpenLocalAiFolder_Click"/>
+                                                <Button Content="Logs" Tag="Logs" Style="{StaticResource ActionButton}" Click="OpenLocalAiFolder_Click"/>
+                                            </WrapPanel>
                                             <ProgressBar x:Name="LocalAiProgress" Height="6" Margin="4,9,4,0" IsIndeterminate="True" Visibility="Collapsed"/>
                                             <TextBlock x:Name="LocalAiStatusText" Text="Local hairstyle AI not checked yet." Foreground="{StaticResource CyanBrush}" TextWrapping="Wrap" Margin="4,8,0,0" FontSize="11"/>
                                         </StackPanel>
@@ -518,6 +526,7 @@
                                             <TextBlock Text="See exactly what Kassie detected when a result looks odd." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,8" FontSize="11"/>
                                             <WrapPanel Margin="-4,0">
                                                 <Button Content="Result" Tag="Result" Style="{StaticResource ActionButton}" Click="HairDiagnosticView_Click"/>
+                                                <Button Content="Source" Tag="Source" Style="{StaticResource ActionButton}" Click="HairDiagnosticView_Click"/>
                                                 <Button Content="Hair mask" Tag="HairMask" Style="{StaticResource ActionButton}" Click="HairDiagnosticView_Click"/>
                                                 <Button Content="Protected face" Tag="FaceMask" Style="{StaticResource ActionButton}" Click="HairDiagnosticView_Click"/>
                                                 <Button Content="Editable region" Tag="EditMask" Style="{StaticResource ActionButton}" Click="HairDiagnosticView_Click"/>
