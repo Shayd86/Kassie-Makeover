@@ -187,8 +187,7 @@ public sealed class HairGenerationService
             // Fall through to a compact raw response.
         }
 
-        var compact = json.Replace('', ' ').Replace('
-', ' ').Trim();
+        var compact = json.Replace('\r', ' ').Replace('\n', ' ').Trim();
         return compact.Length <= 500 ? compact : compact[..500] + "…";
     }
 }
