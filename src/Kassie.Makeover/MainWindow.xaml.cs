@@ -74,6 +74,8 @@ public partial class MainWindow : System.Windows.Window
     private readonly HairService _hair = new();
     private readonly HairReferenceService _hairReferenceService = new();
     private readonly HairTryOnService _hairTryOn = new();
+    private readonly HairGenerationService _hairGeneration = new();
+    private readonly AiCredentialService _credentials = new();
     private readonly LookPresetService _lookService = new();
     private readonly WardrobeService _wardrobeService = new();
 
@@ -85,6 +87,8 @@ public partial class MainWindow : System.Windows.Window
     private List<WardrobeItem> _wardrobe = [];
     private List<HairReference> _hairReferences = [];
     private string? _hairSourcePath;
+    private string? _lastHairResultPath;
+    private CancellationTokenSource? _hairGenerationCts;
     private string _hairMode = "Hairstyles";
     private string _activePage = "Live Mirror";
     private bool _closing;
@@ -154,6 +158,7 @@ public partial class MainWindow : System.Windows.Window
 
         _hairReferences = _hairReferenceService.Load();
         RefreshHairReferences();
+        UpdateOpenAiKeyStatus();
 
         await RefreshCamerasAsync();
     }
@@ -669,9 +674,11 @@ public partial class MainWindow : System.Windows.Window
         HairstyleSourcePlaceholder.Visibility = Visibility.Visible;
         HairstyleResultImage.Source = null;
         HairstyleResultPlaceholder.Visibility = Visibility.Visible;
+        _lastHairResultPath = null;
+        SaveHairResultButton.IsEnabled = false;
         HairSourceStatusText.Text = "No source photo selected.";
         HairRenderStatusText.Text = "Choose a source photo first.";
-        HairstyleResultStatusText.Text = "Build a hairstyle request on the right. The still-image renderer will plug into this result panel.";
+        HairstyleResultStatusText.Text = "Choose a source photo and hairstyle, then click Generate hairstyle.";
     }
 
     private void SetHairstyleSource(string path, string description)
@@ -681,12 +688,63 @@ public partial class MainWindow : System.Windows.Window
         HairstyleSourcePlaceholder.Visibility = Visibility.Collapsed;
         HairstyleResultImage.Source = null;
         HairstyleResultPlaceholder.Visibility = Visibility.Visible;
+        _lastHairResultPath = null;
+        SaveHairResultButton.IsEnabled = false;
         HairSourceStatusText.Text = $"{description} • {Path.GetFileName(path)}";
-        HairRenderStatusText.Text = "Source ready. Choose a hairstyle and prepare the render.";
-        HairstyleResultStatusText.Text = "Source ready. The result will appear here when a hairstyle renderer completes the prepared request.";
+        HairRenderStatusText.Text = "Source ready. Choose a hairstyle and click Generate hairstyle.";
+        HairstyleResultStatusText.Text = "Source ready. Generate a hairstyle to see the edited portrait here.";
     }
 
-    private void PrepareHairstyle_Click(object sender, RoutedEventArgs e)
+    private void UpdateOpenAiKeyStatus()
+    {
+        var key = _credentials.GetOpenAiApiKey();
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            OpenAiKeyStatusText.Text = "No API key saved. Hairstyle generation is disabled until you add one.";
+            OpenAiKeyStatusText.Foreground = (Brush)FindResource("PinkBrush");
+            return;
+        }
+
+        OpenAiKeyStatusText.Text = _credentials.IsUsingEnvironmentKey()
+            ? "OpenAI API key found in OPENAI_API_KEY."
+            : "OpenAI API key saved securely for this Windows account.";
+        OpenAiKeyStatusText.Foreground = (Brush)FindResource("CyanBrush");
+    }
+
+    private void SaveOpenAiKey_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _credentials.SaveOpenAiApiKey(OpenAiApiKeyBox.Password);
+            OpenAiApiKeyBox.Clear();
+            UpdateOpenAiKeyStatus();
+            GlobalStatus.Text = "AI hairstyle key saved";
+        }
+        catch (Exception ex)
+        {
+            OpenAiKeyStatusText.Text = ex.Message;
+            OpenAiKeyStatusText.Foreground = (Brush)FindResource("PinkBrush");
+        }
+    }
+
+    private void ForgetOpenAiKey_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _credentials.ForgetOpenAiApiKey();
+            OpenAiApiKeyBox.Clear();
+            UpdateOpenAiKeyStatus();
+            GlobalStatus.Text = "Saved AI hairstyle key removed";
+        }
+        catch (Exception ex)
+        {
+            OpenAiKeyStatusText.Text = ex.Message;
+            OpenAiKeyStatusText.Foreground = (Brush)FindResource("PinkBrush");
+        }
+    }
+
+    private async void GenerateHairstyle_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_hairSourcePath) || !File.Exists(_hairSourcePath))
         {
@@ -695,20 +753,98 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        var apiKey = _credentials.GetOpenAiApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            HairRenderStatusText.Text = "Add your OpenAI API key in step 4 first.";
+            GlobalStatus.Text = "AI hairstyle key required";
+            return;
+        }
+
+        if (_hairGenerationCts is not null)
+            return;
+
         try
         {
             UpdateHairSettings();
             var request = _hairTryOn.Prepare(_hairSourcePath, _hairSettings);
+
+            _hairGenerationCts = new CancellationTokenSource();
+            GenerateHairstyleButton.IsEnabled = false;
+            CancelHairstyleButton.Visibility = Visibility.Visible;
+            HairGenerationProgress.Visibility = Visibility.Visible;
+            SaveHairResultButton.IsEnabled = false;
+            HairRenderStatusText.Text = $"Generating {request.Settings.StyleFamily} hairstyle… This can take a little while.";
+            HairstyleResultStatusText.Text = "Generating the new hair while preserving the face, pose, clothes and background…";
+            GlobalStatus.Text = "Generating hairstyle…";
+
+            var result = await _hairGeneration.GenerateAsync(
+                request,
+                apiKey,
+                _hairGenerationCts.Token);
+
+            _lastHairResultPath = result.OutputPath;
+            HairstyleResultImage.Source = LoadBitmapUnlocked(result.OutputPath);
+            HairstyleResultPlaceholder.Visibility = Visibility.Collapsed;
+            SaveHairResultButton.IsEnabled = true;
+
             HairRenderStatusText.Text =
-                $"Prepared {request.Settings.StyleFamily} request • {request.Id:N}";
-            HairstyleResultStatusText.Text =
-                $"{request.Prompt}\n\nRequest saved. v0.7 deliberately does not fake the result; this panel is ready for the still-image hair engine.";
-            GlobalStatus.Text = "Hairstyle render request prepared";
+                $"Done • {request.Settings.StyleFamily} • saved to {Path.GetFileName(result.OutputPath)}";
+            GlobalStatus.Text = "Hairstyle generated";
+        }
+        catch (OperationCanceledException)
+        {
+            HairRenderStatusText.Text = "Hairstyle generation cancelled.";
+            HairstyleResultStatusText.Text = "Generation was cancelled. Your source photo is unchanged.";
+            GlobalStatus.Text = "Generation cancelled";
         }
         catch (Exception ex)
         {
-            AppLog.Write($"Hairstyle request failed: {ex}");
+            AppLog.Write($"Hairstyle generation failed: {ex}");
             HairRenderStatusText.Text = ex.Message;
+            HairstyleResultStatusText.Text = "Generation failed. Your source photo is unchanged.";
+            GlobalStatus.Text = "Hairstyle generation failed";
+        }
+        finally
+        {
+            _hairGenerationCts?.Dispose();
+            _hairGenerationCts = null;
+            GenerateHairstyleButton.IsEnabled = true;
+            CancelHairstyleButton.Visibility = Visibility.Collapsed;
+            HairGenerationProgress.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void CancelHairstyle_Click(object sender, RoutedEventArgs e)
+    {
+        _hairGenerationCts?.Cancel();
+    }
+
+    private void SaveHairResult_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastHairResultPath) || !File.Exists(_lastHairResultPath))
+            return;
+
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save hairstyle result",
+            Filter = "PNG image|*.png",
+            FileName = $"Kassie-Hairstyle-{DateTime.Now:yyyyMMdd-HHmmss}.png",
+            AddExtension = true,
+            DefaultExt = ".png"
+        };
+
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        try
+        {
+            File.Copy(_lastHairResultPath, dialog.FileName, true);
+            GlobalStatus.Text = $"Saved {Path.GetFileName(dialog.FileName)}";
+        }
+        catch (Exception ex)
+        {
+            GlobalStatus.Text = $"Could not save result: {ex.Message}";
         }
     }
 
@@ -997,6 +1133,7 @@ public partial class MainWindow : System.Windows.Window
             return;
 
         _closing = true;
+        _hairGenerationCts?.Cancel();
         GlobalStatus.Text = "Closing camera…";
         AppLog.Camera("Window close requested. Waiting for camera shutdown before closing WPF.");
 
