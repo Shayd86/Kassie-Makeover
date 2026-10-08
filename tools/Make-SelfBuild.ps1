@@ -28,17 +28,17 @@ try {
     if (!(Test-Path $zip)) { throw "Source ZIP was not created." }
 
     $compact = $Version.Replace(".", "")
-    $header = @"
+    $template = @'
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 set "SELF=%~f0"
-set "WORK=%TEMP%\KassieMakeover-v$compact-%RANDOM%%RANDOM%"
+set "WORK=%TEMP%\KassieMakeover-v__COMPACT__-%RANDOM%%RANDOM%"
 set "PAYLOADZIP=%WORK%\source.zip"
 set "SOURCE=%WORK%\source"
 
 cls
 echo ============================================================
-echo   Kassie Makeover v$Version - Native C# Local Builder
+echo   Kassie Makeover v__VERSION__ - Native C# Local Builder
 echo ============================================================
 echo.
 where dotnet >nul 2>nul
@@ -52,7 +52,7 @@ echo .NET SDK: %DOTNETVER%
 echo.
 mkdir "%WORK%" >nul 2>nul
 mkdir "%SOURCE%" >nul 2>nul
-echo [1/3] Unpacking Kassie Makeover v$Version source...
+echo [1/3] Unpacking Kassie Makeover v__VERSION__ source...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=[IO.File]::ReadAllText($env:SELF); $m=('###KASSIE_'+'PAYLOAD###'); $i=$p.IndexOf($m); if($i -lt 0){throw 'Embedded payload not found'}; $s=$p.Substring($i+$m.Length); $bytes=[Convert]::FromBase64String(($s -replace '\s','')); [IO.File]::WriteAllBytes($env:PAYLOADZIP,$bytes); Expand-Archive -LiteralPath $env:PAYLOADZIP -DestinationPath $env:SOURCE -Force"
 if errorlevel 1 goto :failed
 echo [2/3] Building native C# EXE and Hub package...
@@ -65,7 +65,7 @@ echo ============================================================
 echo DONE
 echo ============================================================
 echo Your Hub update is now in Downloads:
-echo %USERPROFILE%\Downloads\Kassie-Makeover-v$Version.zip
+echo %USERPROFILE%\Downloads\Kassie-Makeover-v__VERSION__.zip
 echo.
 echo Leave the ZIP there and do not extract it.
 echo.
@@ -80,8 +80,9 @@ echo.
 pause
 exit /b 1
 ###KASSIE_PAYLOAD###
-"@
+'@
 
+    $header = $template.Replace("__VERSION__", $Version).Replace("__COMPACT__", $compact)
     $payload = [Convert]::ToBase64String([IO.File]::ReadAllBytes($zip))
     $lines = for ($i = 0; $i -lt $payload.Length; $i += 76) {
         $payload.Substring($i, [Math]::Min(76, $payload.Length - $i))
