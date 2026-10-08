@@ -2,7 +2,13 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "APPID=kassie-makeover"
-set "VERSION=0.4.1"
+set "VERSION="
+set /p VERSION=<"%~dp0VERSION.txt"
+if "%VERSION%"=="" (
+  echo ERROR: VERSION.txt is empty or missing.
+  pause
+  exit /b 1
+)
 set "EXE=Kassie-Makeover.exe"
 set "ROOT=%~dp0"
 set "PROJECT=%ROOT%src\Kassie.Makeover\Kassie.Makeover.csproj"
