@@ -157,7 +157,11 @@
                                         <TextBlock Text="Live Makeup  •  Beta" FontSize="17" FontWeight="Bold"/>
                                         <TextBlock Text="Face, eye and mouth tracking runs locally. On first use, small OpenCV detector files are downloaded to D:\Kassie\Makeover\models." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
                                         <CheckBox x:Name="LiveMakeupCheck" Content="Enable live makeup" IsChecked="True" Foreground="White" Margin="0,4" Checked="MakeupControl_Changed" Unchecked="MakeupControl_Changed"/>
-                                        <TextBlock x:Name="MakeupModelStatus" Text="Face tracking not loaded yet" Foreground="{StaticResource PinkBrush}" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11"/>
+                                        <TextBlock x:Name="MakeupModelStatus" Text="Face tracking not loaded yet" Foreground="{StaticResource PinkBrush}" TextWrapping="Wrap" Margin="0,8,0,10" FontSize="11"/>
+                                        <WrapPanel Margin="-4,0">
+                                            <Button Content="Capture makeover" Style="{StaticResource ActionButton}" Click="CaptureMakeup_Click"/>
+                                            <Button Content="Open captures" Style="{StaticResource ActionButton}" Click="OpenOutputs_Click"/>
+                                        </WrapPanel>
                                     </StackPanel>
                                 </Border>
 
