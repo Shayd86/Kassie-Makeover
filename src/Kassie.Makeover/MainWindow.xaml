@@ -307,12 +307,12 @@
 
                                     <Grid Grid.Row="1">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="14"/>
-                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition x:Name="HairSourceColumn" Width="*"/>
+                                            <ColumnDefinition x:Name="HairSpacerColumn" Width="14"/>
+                                            <ColumnDefinition x:Name="HairResultColumn" Width="*"/>
                                         </Grid.ColumnDefinitions>
 
-                                        <Border Background="#080A14" BorderBrush="#24294A" BorderThickness="1" CornerRadius="10" ClipToBounds="True">
+                                        <Border x:Name="HairSourceBorder" Background="#080A14" BorderBrush="#24294A" BorderThickness="1" CornerRadius="10" ClipToBounds="True">
                                             <Grid>
                                                 <Image x:Name="HairstyleSourceImage" Stretch="Uniform"/>
                                                 <StackPanel x:Name="HairstyleSourcePlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="22">
@@ -323,7 +323,7 @@
                                             </Grid>
                                         </Border>
 
-                                        <Border Grid.Column="2" Background="#080A14" BorderBrush="#2A4F55" BorderThickness="1" CornerRadius="10" ClipToBounds="True">
+                                        <Border x:Name="HairResultBorder" Grid.Column="2" Background="#080A14" BorderBrush="#2A4F55" BorderThickness="1" CornerRadius="10" ClipToBounds="True">
                                             <Grid>
                                                 <Image x:Name="HairstyleResultImage" Stretch="Uniform"/>
                                                 <StackPanel x:Name="HairstyleResultPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="22">
@@ -336,7 +336,18 @@
                                     </Grid>
 
                                     <Border Grid.Row="2" Background="#0C1320" BorderBrush="#1D3A49" BorderThickness="1" CornerRadius="9" Padding="10" Margin="0,12,0,0">
-                                        <TextBlock x:Name="HairSourceStatusText" Text="No source photo selected." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="11"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="HairSourceStatusText" Text="No source photo selected." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="11" VerticalAlignment="Center"/>
+                                            <WrapPanel Grid.Column="1" Margin="12,-4,-4,-4">
+                                                <Button Content="Side by side" Tag="SideBySide" Style="{StaticResource ActionButton}" Click="HairCompareMode_Click"/>
+                                                <Button Content="Before" Tag="Before" Style="{StaticResource ActionButton}" Click="HairCompareMode_Click"/>
+                                                <Button Content="After" Tag="After" Style="{StaticResource ActionButton}" Click="HairCompareMode_Click"/>
+                                            </WrapPanel>
+                                        </Grid>
                                     </Border>
                                 </Grid>
                             </Border>
@@ -465,17 +476,83 @@
                                         </StackPanel>
                                     </Border>
 
-                                    <Border Background="#0C1320" BorderBrush="#1D3A49" BorderThickness="1" CornerRadius="12" Padding="16">
+                                    <Border Background="#0C1320" BorderBrush="#1D3A49" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
                                         <StackPanel>
                                             <TextBlock Text="5. Generate hairstyle" FontSize="16" FontWeight="Bold"/>
-                                            <TextBlock Text="Kassie segments the hair locally, protects the recognised face, then runs the edit on your own PC. A 4 GB GPU is treated as low-VRAM: text encoding and VAE work are offloaded to system RAM automatically." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
-                                            <Button x:Name="GenerateHairstyleButton" Content="Generate hairstyle" Style="{StaticResource ActionButton}" Click="GenerateHairstyle_Click"/>
-                                            <Button x:Name="CancelHairstyleButton" Content="Cancel generation" Visibility="Collapsed" Style="{StaticResource ActionButton}" Click="CancelHairstyle_Click"/>
+                                            <TextBlock Text="Kassie segments the hair locally, protects the recognised face, then runs the edit on your own PC. The 4 GB GPU path stays deliberately conservative." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
+
+                                            <Grid Margin="0,0,0,10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="10"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="Hair change" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                                    <ComboBox x:Name="HairStrengthCombo" MinHeight="32" SelectionChanged="HairControl_Changed"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="Quality" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                                    <ComboBox x:Name="HairQualityCombo" MinHeight="32" SelectionChanged="HairControl_Changed"/>
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <WrapPanel Margin="-4,0">
+                                                <Button x:Name="GenerateHairstyleButton" Content="Generate hairstyle" Style="{StaticResource ActionButton}" Click="GenerateHairstyle_Click"/>
+                                                <Button x:Name="GenerateThreeButton" Content="Generate 3 variations" Style="{StaticResource ActionButton}" Click="GenerateThreeHairstyles_Click"/>
+                                                <Button x:Name="CancelHairstyleButton" Content="Cancel generation" Visibility="Collapsed" Style="{StaticResource ActionButton}" Click="CancelHairstyle_Click"/>
+                                            </WrapPanel>
                                             <ProgressBar x:Name="HairGenerationProgress" Height="6" Margin="4,9,4,0" IsIndeterminate="True" Visibility="Collapsed"/>
                                             <TextBlock x:Name="HairRenderStatusText" Text="Choose a source photo first." Foreground="{StaticResource CyanBrush}" TextWrapping="Wrap" Margin="4,8,0,0" FontSize="11"/>
                                             <WrapPanel Margin="-4,8,0,0">
+                                                <Button x:Name="UseHairResultAsSourceButton" Content="Use result as source" IsEnabled="False" Style="{StaticResource ActionButton}" Click="UseHairResultAsSource_Click"/>
                                                 <Button x:Name="SaveHairResultButton" Content="Save a copy" IsEnabled="False" Style="{StaticResource ActionButton}" Click="SaveHairResult_Click"/>
                                                 <Button Content="Open hairstyle folder" Style="{StaticResource ActionButton}" Click="OpenHairFolder_Click"/>
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="{StaticResource PanelBrush}" BorderBrush="#2A3053" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <TextBlock Text="Advanced / Diagnostics" FontSize="15" FontWeight="Bold"/>
+                                            <TextBlock Text="See exactly what Kassie detected when a result looks odd." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,8" FontSize="11"/>
+                                            <WrapPanel Margin="-4,0">
+                                                <Button Content="Result" Tag="Result" Style="{StaticResource ActionButton}" Click="HairDiagnosticView_Click"/>
+                                                <Button Content="Hair mask" Tag="HairMask" Style="{StaticResource ActionButton}" Click="HairDiagnosticView_Click"/>
+                                                <Button Content="Protected face" Tag="FaceMask" Style="{StaticResource ActionButton}" Click="HairDiagnosticView_Click"/>
+                                                <Button Content="Editable region" Tag="EditMask" Style="{StaticResource ActionButton}" Click="HairDiagnosticView_Click"/>
+                                            </WrapPanel>
+                                            <TextBlock x:Name="HairDiagnosticStatusText" Text="Generate a hairstyle to create diagnostic masks." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="4,7,0,0" FontSize="11"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="{StaticResource PanelBrush}" BorderBrush="#2A3053" BorderThickness="1" CornerRadius="12" Padding="16">
+                                        <StackPanel>
+                                            <TextBlock Text="Recent hairstyle results" FontSize="15" FontWeight="Bold"/>
+                                            <TextBlock Text="Results stay on disk and can be reopened or used as the starting point for another edit." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,8" FontSize="11"/>
+                                            <ListBox x:Name="HairHistoryList" Height="260" Background="#080A14" BorderBrush="#2B3152" SelectionChanged="HairHistoryList_SelectionChanged">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="4">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="64"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Width="56" Height="56" Background="#050711" CornerRadius="6" ClipToBounds="True">
+                                                                <Image Source="{Binding OutputPath}" Stretch="UniformToFill"/>
+                                                            </Border>
+                                                            <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                                                <TextBlock Text="{Binding Summary}" Foreground="#E7EAF8" TextWrapping="Wrap"/>
+                                                                <TextBlock Text="{Binding Seed, StringFormat='Seed {0}'}" Foreground="#747C9B" FontSize="10"/>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <WrapPanel Margin="-4,8,0,0">
+                                                <Button Content="View selected" Style="{StaticResource ActionButton}" Click="ViewHairHistory_Click"/>
+                                                <Button Content="Use as source" Style="{StaticResource ActionButton}" Click="UseHistoryAsSource_Click"/>
+                                                <Button Content="Remove from history" Style="{StaticResource ActionButton}" Click="RemoveHairHistory_Click"/>
                                             </WrapPanel>
                                         </StackPanel>
                                     </Border>
