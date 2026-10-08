@@ -12,7 +12,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         AppPaths.Ensure();
-        AppLog.Write("Kassie Makeover 0.3.0 starting.");
+        AppLog.Write($"Kassie Makeover {GetType().Assembly.GetName().Version} starting.");
 
         _instanceMutex = new Mutex(true, @"Local\KassieMakeover-58B1C6D5-9BB4-4B4E-BD39-5E72E76CC84C", out var createdNew);
         if (!createdNew)
