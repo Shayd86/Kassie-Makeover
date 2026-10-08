@@ -316,7 +316,7 @@ public sealed class MakeupService : IDisposable
             frame.Height);
 
         using var target = new Mat(frame, padded);
-        using var mask = Mat.Zeros(target.Rows, target.Cols, MatType.CV_8UC1);
+        using var mask = new Mat(target.Rows, target.Cols, MatType.CV_8UC1, Scalar.Black);
 
         var cx = mouth.X + mouth.Width / 2 - padded.X;
         var cy = mouth.Y + mouth.Height / 2 - padded.Y;
@@ -345,7 +345,7 @@ public sealed class MakeupService : IDisposable
 
         if (finish.Equals("Gloss", StringComparison.OrdinalIgnoreCase))
         {
-            using var glossMask = Mat.Zeros(target.Rows, target.Cols, MatType.CV_8UC1);
+            using var glossMask = new Mat(target.Rows, target.Cols, MatType.CV_8UC1, Scalar.Black);
             Cv2.Ellipse(
                 glossMask,
                 new Point(cx, cy - Math.Max(1, mouth.Height / 8)),
