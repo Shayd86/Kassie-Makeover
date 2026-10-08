@@ -73,6 +73,7 @@ public partial class MainWindow : System.Windows.Window
     private readonly MakeupAdvisorService _advisor = new();
     private readonly HairService _hair = new();
     private readonly HairReferenceService _hairReferenceService = new();
+    private readonly HairTryOnService _hairTryOn = new();
     private readonly LookPresetService _lookService = new();
     private readonly WardrobeService _wardrobeService = new();
 
@@ -83,6 +84,8 @@ public partial class MainWindow : System.Windows.Window
     private List<LookPreset> _looks = [];
     private List<WardrobeItem> _wardrobe = [];
     private List<HairReference> _hairReferences = [];
+    private string? _hairSourcePath;
+    private string _hairMode = "Hairstyles";
     private string _activePage = "Live Mirror";
     private bool _closing;
     private bool _shutdownComplete;
@@ -104,6 +107,7 @@ public partial class MainWindow : System.Windows.Window
         HairColorCombo.ItemsSource = HairColors;
         HairFinishCombo.ItemsSource = new[] { "Natural", "Glossy", "Matte" };
         HairCoverageCombo.ItemsSource = new[] { "Full", "Roots", "Highlights" };
+        HairStyleFamilyCombo.ItemsSource = new[] { "Pixie", "Bob", "Lob", "Layered", "Shag", "Long waves", "Ponytail", "Bun / updo" };
         HairLengthCombo.ItemsSource = new[] { "Very short", "Short", "Medium", "Long", "Very long" };
         HairTextureCombo.ItemsSource = new[] { "Straight", "Wavy", "Curly", "Coily" };
         HairFringeCombo.ItemsSource = new[] { "None", "Soft", "Full", "Curtain", "Side" };
@@ -119,6 +123,7 @@ public partial class MainWindow : System.Windows.Window
 
         HairColorCombo.SelectedItem = HairColors.First(x => x.Name == "Chestnut");
         HairFinishCombo.SelectedItem = "Natural";
+        HairStyleFamilyCombo.SelectedItem = "Layered";
         HairCoverageCombo.SelectedItem = "Full";
         HairLengthCombo.SelectedItem = "Medium";
         HairTextureCombo.SelectedItem = "Wavy";
@@ -229,7 +234,7 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
-        if (_activePage == "Hair")
+        if (_activePage == "Hair" && _hairMode == "Colour")
         {
             var hair = _hairSettings;
             if (hair.Enabled && _makeup.Ready)
@@ -373,6 +378,7 @@ public partial class MainWindow : System.Windows.Window
             Color = colour.Hex,
             Finish = HairFinishCombo.SelectedItem as string ?? "Natural",
             Coverage = HairCoverageCombo.SelectedItem as string ?? "Full",
+            StyleFamily = HairStyleFamilyCombo.SelectedItem as string ?? "Layered",
             Length = HairLengthCombo.SelectedItem as string ?? "Medium",
             Texture = HairTextureCombo.SelectedItem as string ?? "Wavy",
             Fringe = HairFringeCombo.SelectedItem as string ?? "None",
@@ -382,7 +388,7 @@ public partial class MainWindow : System.Windows.Window
 
         HairIntensityText.Text = $"{_hairSettings.Intensity}%";
         HairStyleSummary.Text =
-            $"{_hairSettings.Length} • {_hairSettings.Texture} • " +
+            $"{_hairSettings.StyleFamily} • {_hairSettings.Length} • {_hairSettings.Texture} • " +
             $"{(_hairSettings.Fringe == "None" ? "No fringe" : _hairSettings.Fringe + " fringe")} • {_hairSettings.Volume} volume";
 
         UpdateLooksSummary();
@@ -399,6 +405,7 @@ public partial class MainWindow : System.Windows.Window
                                           ?? HairColors.First(x => x.Name == "Chestnut");
             HairFinishCombo.SelectedItem = settings.Finish;
             HairCoverageCombo.SelectedItem = settings.Coverage;
+            HairStyleFamilyCombo.SelectedItem = settings.StyleFamily;
             HairLengthCombo.SelectedItem = settings.Length;
             HairTextureCombo.SelectedItem = settings.Texture;
             HairFringeCombo.SelectedItem = settings.Fringe;
@@ -446,7 +453,7 @@ public partial class MainWindow : System.Windows.Window
         var h = _hairSettings;
         LooksSummary.Text =
             $"Current makeup: {(s.Lipstick ? "lipstick" : "no lipstick")}, {(s.Blush ? "blush" : "no blush")}, {(s.Eyeshadow ? "eyeshadow" : "no eyeshadow")} • {s.Intensity}% intensity.\n" +
-            $"Current hair: {h.Length}, {h.Texture}, {h.Color} • {h.Coverage.ToLowerInvariant()} colour at {h.Intensity}%.\n\n" +
+            $"Current hair: {h.StyleFamily}, {h.Length}, {h.Texture} • {h.Coverage.ToLowerInvariant()} colour at {h.Intensity}%.\n\n" +
             $"Saved looks: {_looks.Count}.";
     }
 
@@ -586,17 +593,135 @@ public partial class MainWindow : System.Windows.Window
         HairTrackingStatus.Foreground = (Brush)FindResource(_makeup.Ready ? "CyanBrush" : "PinkBrush");
     }
 
-    private void HairMode_Click(object sender, RoutedEventArgs e)
+    private async void HairMode_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || button.Tag is not string mode) return;
 
-        var style = mode == "Style";
-        HairColourPanel.Visibility = style ? Visibility.Collapsed : Visibility.Visible;
-        HairStylePanel.Visibility = style ? Visibility.Visible : Visibility.Collapsed;
-        HairModeHint.Text = style
-            ? "STYLE LAB • Build a haircut brief and add reference photos."
-            : "LIVE COLOUR • Fast camera tint for trying shades.";
-        HairModeHint.Foreground = (Brush)FindResource(style ? "PinkBrush" : "CyanBrush");
+        _hairMode = mode;
+        var colour = mode == "Colour";
+
+        HairstylePanel.Visibility = colour ? Visibility.Collapsed : Visibility.Visible;
+        HairstyleWorkspace.Visibility = colour ? Visibility.Collapsed : Visibility.Visible;
+        HairColourPanel.Visibility = colour ? Visibility.Visible : Visibility.Collapsed;
+        HairColourWorkspace.Visibility = colour ? Visibility.Visible : Visibility.Collapsed;
+
+        HairModeHint.Text = colour
+            ? "HAIR COLOUR • Quick live beta preview."
+            : "HAIRSTYLES • Capture or import a portrait, then build the style.";
+        HairModeHint.Foreground = (Brush)FindResource(colour ? "PinkBrush" : "CyanBrush");
+
+        if (colour)
+            await EnsureHairTrackingReadyAsync();
+    }
+
+    private async void CaptureHairstyleSource_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (!_camera.IsRunning)
+                await StartSelectedCameraAsync();
+
+            if (!_camera.IsRunning)
+            {
+                HairSourceStatusText.Text = "Camera could not be started.";
+                return;
+            }
+
+            var path = _camera.SaveSnapshotTo(AppPaths.HairInputs, "Hair-Source");
+            SetHairstyleSource(path, "Camera capture");
+            GlobalStatus.Text = "Hairstyle source captured";
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write($"Hairstyle camera capture failed: {ex}");
+            HairSourceStatusText.Text = ex.Message;
+        }
+    }
+
+    private void ImportHairstyleSource_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose a portrait for hairstyle try-on",
+            Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog(this) != true) return;
+
+        try
+        {
+            var path = _hairTryOn.ImportSource(dialog.FileName);
+            SetHairstyleSource(path, $"Imported {Path.GetFileName(dialog.FileName)}");
+            GlobalStatus.Text = "Hairstyle source imported";
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write($"Hairstyle source import failed: {ex}");
+            HairSourceStatusText.Text = ex.Message;
+        }
+    }
+
+    private void ClearHairstyleSource_Click(object sender, RoutedEventArgs e)
+    {
+        _hairSourcePath = null;
+        HairstyleSourceImage.Source = null;
+        HairstyleSourcePlaceholder.Visibility = Visibility.Visible;
+        HairstyleResultImage.Source = null;
+        HairstyleResultPlaceholder.Visibility = Visibility.Visible;
+        HairSourceStatusText.Text = "No source photo selected.";
+        HairRenderStatusText.Text = "Choose a source photo first.";
+        HairstyleResultStatusText.Text = "Build a hairstyle request on the right. The still-image renderer will plug into this result panel.";
+    }
+
+    private void SetHairstyleSource(string path, string description)
+    {
+        _hairSourcePath = path;
+        HairstyleSourceImage.Source = LoadBitmapUnlocked(path);
+        HairstyleSourcePlaceholder.Visibility = Visibility.Collapsed;
+        HairstyleResultImage.Source = null;
+        HairstyleResultPlaceholder.Visibility = Visibility.Visible;
+        HairSourceStatusText.Text = $"{description} • {Path.GetFileName(path)}";
+        HairRenderStatusText.Text = "Source ready. Choose a hairstyle and prepare the render.";
+        HairstyleResultStatusText.Text = "Source ready. The result will appear here when a hairstyle renderer completes the prepared request.";
+    }
+
+    private void PrepareHairstyle_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_hairSourcePath) || !File.Exists(_hairSourcePath))
+        {
+            HairRenderStatusText.Text = "Capture or import a source portrait first.";
+            GlobalStatus.Text = "Hairstyle source required";
+            return;
+        }
+
+        try
+        {
+            UpdateHairSettings();
+            var request = _hairTryOn.Prepare(_hairSourcePath, _hairSettings);
+            HairRenderStatusText.Text =
+                $"Prepared {request.Settings.StyleFamily} request • {request.Id:N}";
+            HairstyleResultStatusText.Text =
+                $"{request.Prompt}\n\nRequest saved. v0.7 deliberately does not fake the result; this panel is ready for the still-image hair engine.";
+            GlobalStatus.Text = "Hairstyle render request prepared";
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write($"Hairstyle request failed: {ex}");
+            HairRenderStatusText.Text = ex.Message;
+        }
+    }
+
+    private static BitmapImage LoadBitmapUnlocked(string path)
+    {
+        using var stream = File.OpenRead(path);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 
     private void HairControl_Changed(object sender, RoutedEventArgs e) => UpdateHairSettings();
@@ -713,7 +838,7 @@ public partial class MainWindow : System.Windows.Window
     private void LooksList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (LooksList.SelectedItem is LookPreset look)
-            LooksSummary.Text = $"“{look.Name}” • {look.Makeup.Intensity}% makeup • {look.Hair.Length} {look.Hair.Texture.ToLowerInvariant()} hair • saved {look.CreatedAt:g}";
+            LooksSummary.Text = $"“{look.Name}” • {look.Makeup.Intensity}% makeup • {look.Hair.StyleFamily} / {look.Hair.Length} {look.Hair.Texture.ToLowerInvariant()} hair • saved {look.CreatedAt:g}";
         else
             UpdateLooksSummary();
     }
@@ -801,8 +926,6 @@ public partial class MainWindow : System.Windows.Window
 
         if (page == "Makeup")
             await EnsureMakeupReadyAsync();
-        else if (page == "Hair")
-            await EnsureHairTrackingReadyAsync();
     }
 
     private void ShowPage(string page)
@@ -834,7 +957,7 @@ public partial class MainWindow : System.Windows.Window
                 RefreshWardrobe();
                 break;
             case "Hair":
-                PageSubtitle.Text = "Try colour live and build hairstyle briefs with references.";
+                PageSubtitle.Text = "Try hairstyles from a photo, with live hair colour as a secondary beta.";
                 RefreshHairReferences();
                 break;
             case "Outfit":
