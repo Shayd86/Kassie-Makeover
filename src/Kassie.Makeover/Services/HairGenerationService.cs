@@ -1,7 +1,8 @@
+using System.Diagnostics;
 using System.IO;
-using System.Net.Http;
-using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
+using OpenCvSharp;
 using Kassie.Makeover.Infrastructure;
 using Kassie.Makeover.Models;
 
@@ -9,188 +10,307 @@ namespace Kassie.Makeover.Services;
 
 public sealed class HairGenerationService
 {
-    private const string Endpoint = "https://api.openai.com/v1/images/edits";
-    private const string Model = "gpt-image-1.5";
+    private readonly LocalAiAssetService _assets;
+    private readonly HairSegmentationService _segmentation;
 
-    private static readonly HttpClient Client = CreateClient();
-
-    private static HttpClient CreateClient()
+    public HairGenerationService(
+        LocalAiAssetService assets,
+        HairSegmentationService segmentation)
     {
-        var client = new HttpClient
-        {
-            Timeout = TimeSpan.FromMinutes(8)
-        };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Kassie-Makeover/0.8.0");
-        return client;
+        _assets = assets;
+        _segmentation = segmentation;
     }
 
     public async Task<HairGenerationResult> GenerateAsync(
         HairTryOnRequest request,
-        string apiKey,
+        IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException("An OpenAI API key is required for hairstyle generation.");
-
         if (!File.Exists(request.SourcePath))
             throw new FileNotFoundException("The hairstyle source image cannot be found.", request.SourcePath);
 
-        AppPaths.Ensure();
+        await _assets.EnsureReadyAsync(progress, cancellationToken);
 
-        var prompt = BuildGenerationPrompt(request);
-        using var form = new MultipartFormDataContent();
-
-        AddText(form, "model", Model);
-        AddText(form, "prompt", prompt);
-        AddText(form, "input_fidelity", "high");
-        AddText(form, "quality", "high");
-        AddText(form, "size", "auto");
-        AddText(form, "output_format", "png");
-
-        await AddImageAsync(form, request.SourcePath, cancellationToken);
-
-        var referencePath = request.ReferencePath;
-        if (!string.IsNullOrWhiteSpace(referencePath) && File.Exists(referencePath))
-            await AddImageAsync(form, referencePath, cancellationToken);
-
-        using var message = new HttpRequestMessage(HttpMethod.Post, Endpoint)
-        {
-            Content = form
-        };
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey.Trim());
-
-        AppLog.Write($"Generating hairstyle request {request.Id:N} with {Model}.");
-
-        using var response = await Client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var detail = ExtractApiError(body);
-            AppLog.Write($"Hairstyle generation API error {(int)response.StatusCode}: {detail}");
-            throw new InvalidOperationException(
-                $"Hairstyle generation failed ({(int)response.StatusCode}): {detail}");
-        }
-
-        using var json = JsonDocument.Parse(body);
-        if (!json.RootElement.TryGetProperty("data", out var data) ||
-            data.ValueKind != JsonValueKind.Array ||
-            data.GetArrayLength() == 0 ||
-            !data[0].TryGetProperty("b64_json", out var imageElement))
-        {
-            throw new InvalidOperationException("The hairstyle service returned no image.");
-        }
-
-        var base64 = imageElement.GetString();
-        if (string.IsNullOrWhiteSpace(base64))
-            throw new InvalidOperationException("The hairstyle service returned an empty image.");
-
-        byte[] imageBytes;
-        try
-        {
-            imageBytes = Convert.FromBase64String(base64);
-        }
-        catch (FormatException ex)
-        {
-            throw new InvalidOperationException("The hairstyle service returned invalid image data.", ex);
-        }
-
+        var workId = request.Id.ToString("N");
+        var workingSource = Path.Combine(AppPaths.Temp, $"hair-source-{workId}.png");
+        var maskPath = Path.Combine(AppPaths.HairRequests, $"{workId}-mask.png");
         var outputPath = Path.Combine(
             AppPaths.HairOutputs,
-            $"Hair-Result-{DateTime.Now:yyyyMMdd-HHmmss}-{request.Id:N}.png");
+            $"Hair-Result-{DateTime.Now:yyyyMMdd-HHmmss}-{workId}.png");
 
-        await File.WriteAllBytesAsync(outputPath, imageBytes, cancellationToken);
+        try
+        {
+            progress?.Report("Preparing portrait for local AI…");
+            var size = PrepareWorkingImage(request.SourcePath, workingSource);
 
+            progress?.Report("Finding the real hair and face regions…");
+            _segmentation.CreateEditMask(workingSource, request.Settings, maskPath);
+
+            progress?.Report("Generating hairstyle locally • GPU first…");
+
+            var prompt = BuildGenerationPrompt(request);
+            var negative =
+                "different person, changed face, deformed face, distorted eyes, distorted mouth, " +
+                "extra face, extra person, hat, headwear, helmet, wig edge, plastic hair, painted hair, " +
+                "cartoon, illustration, low quality, blurry, bad anatomy";
+
+            var vulkan = _assets.GetVulkanCli();
+            var cpu = _assets.GetCpuCli();
+
+            if (vulkan is null && cpu is null)
+                throw new InvalidOperationException("The local hairstyle runtime is missing.");
+
+            var error = "";
+
+            if (vulkan is not null)
+            {
+                var result = await RunSdCliAsync(
+                    vulkan,
+                    useGpu: true,
+                    workingSource,
+                    maskPath,
+                    outputPath,
+                    prompt,
+                    negative,
+                    size.Width,
+                    size.Height,
+                    progress,
+                    cancellationToken);
+
+                if (result.ExitCode == 0 && File.Exists(outputPath))
+                    return await FinishAsync(request, outputPath, prompt, "stable-diffusion.cpp Vulkan / SD1.5 Q4", cancellationToken);
+
+                error = result.ErrorText;
+                AppLog.Write($"Vulkan hairstyle generation failed; trying CPU fallback. {error}");
+                progress?.Report("GPU path failed • retrying locally on CPU…");
+            }
+
+            if (cpu is not null)
+            {
+                try { if (File.Exists(outputPath)) File.Delete(outputPath); } catch { }
+
+                var result = await RunSdCliAsync(
+                    cpu,
+                    useGpu: false,
+                    workingSource,
+                    maskPath,
+                    outputPath,
+                    prompt,
+                    negative,
+                    size.Width,
+                    size.Height,
+                    progress,
+                    cancellationToken);
+
+                if (result.ExitCode == 0 && File.Exists(outputPath))
+                    return await FinishAsync(request, outputPath, prompt, "stable-diffusion.cpp CPU / SD1.5 Q4", cancellationToken);
+
+                error = result.ErrorText;
+            }
+
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(error)
+                    ? "The local hairstyle engine stopped without creating an image."
+                    : $"The local hairstyle engine failed: {LastUsefulLines(error)}");
+        }
+        finally
+        {
+            try { if (File.Exists(workingSource)) File.Delete(workingSource); } catch { }
+        }
+    }
+
+    private static Size PrepareWorkingImage(string sourcePath, string outputPath)
+    {
+        using var source = Cv2.ImRead(sourcePath, ImreadModes.Color);
+        if (source.Empty())
+            throw new InvalidOperationException("The source portrait could not be opened.");
+
+        const int maxSide = 640;
+        var scale = Math.Min(1.0, maxSide / (double)Math.Max(source.Width, source.Height));
+
+        var scaledWidth = Math.Max(256, (int)Math.Round(source.Width * scale));
+        var scaledHeight = Math.Max(256, (int)Math.Round(source.Height * scale));
+
+        var width = Math.Max(256, (scaledWidth / 64) * 64);
+        var height = Math.Max(256, (scaledHeight / 64) * 64);
+
+        width = Math.Min(maxSide, width);
+        height = Math.Min(maxSide, height);
+
+        using var resized = new Mat();
+        Cv2.Resize(source, resized, new Size(width, height), 0, 0, InterpolationFlags.Lanczos4);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+        if (!Cv2.ImWrite(outputPath, resized))
+            throw new IOException("The local AI working portrait could not be saved.");
+
+        return new Size(width, height);
+    }
+
+    private static async Task<(int ExitCode, string ErrorText)> RunSdCliAsync(
+        string executable,
+        bool useGpu,
+        string source,
+        string mask,
+        string output,
+        string prompt,
+        string negativePrompt,
+        int width,
+        int height,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = Path.GetDirectoryName(executable)!,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+
+        void Add(string value) => psi.ArgumentList.Add(value);
+
+        Add("-m"); Add(Path.GetFullPath(Path.Combine(AppPaths.HairModels, "sd15-q4_0.gguf")));
+        Add("-i"); Add(source);
+        Add("--mask"); Add(mask);
+        Add("-o"); Add(output);
+        Add("-p"); Add(prompt);
+        Add("-n"); Add(negativePrompt);
+        Add("--strength"); Add("0.72");
+        Add("--steps"); Add("24");
+        Add("--cfg-scale"); Add("6.5");
+        Add("--sampling-method"); Add("euler_a");
+        Add("--width"); Add(width.ToString());
+        Add("--height"); Add(height.ToString());
+        Add("--vae-tiling");
+        Add("--vae-on-cpu");
+        Add("--clip-on-cpu");
+        Add("--offload-to-cpu");
+        Add("--auto-fit"); Add("on");
+
+        if (useGpu)
+        {
+            Add("--backend"); Add("gpu");
+            Add("--max-vram"); Add("vulkan0=3.2");
+        }
+        else
+        {
+            Add("--backend"); Add("cpu");
+        }
+
+        using var process = new Process { StartInfo = psi };
+        var log = new StringBuilder();
+
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (string.IsNullOrWhiteSpace(e.Data)) return;
+            lock (log) log.AppendLine(e.Data);
+            ReportInterestingProgress(e.Data, progress);
+        };
+
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (string.IsNullOrWhiteSpace(e.Data)) return;
+            lock (log) log.AppendLine(e.Data);
+            ReportInterestingProgress(e.Data, progress);
+        };
+
+        AppLog.Write($"Starting local hairstyle runtime: {Path.GetFileName(executable)} {(useGpu ? "GPU" : "CPU")}");
+
+        if (!process.Start())
+            throw new InvalidOperationException("The local hairstyle process could not be started.");
+
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(true);
+            }
+            catch { }
+
+            throw;
+        }
+
+        string text;
+        lock (log) text = log.ToString();
+
+        AppLog.Write($"Local hairstyle runtime exited {process.ExitCode}. {LastUsefulLines(text)}");
+        return (process.ExitCode, text);
+    }
+
+    private static void ReportInterestingProgress(string line, IProgress<string>? progress)
+    {
+        var lower = line.ToLowerInvariant();
+
+        if (lower.Contains("sampling") || lower.Contains("step "))
+            progress?.Report("Generating hairstyle locally…");
+        else if (lower.Contains("loading") && lower.Contains("model"))
+            progress?.Report("Loading local hairstyle model…");
+        else if (lower.Contains("vae"))
+            progress?.Report("Finishing hairstyle image…");
+    }
+
+    private static async Task<HairGenerationResult> FinishAsync(
+        HairTryOnRequest request,
+        string outputPath,
+        string prompt,
+        string model,
+        CancellationToken cancellationToken)
+    {
         var result = new HairGenerationResult
         {
             RequestId = request.Id,
             OutputPath = outputPath,
-            Model = Model,
+            Model = model,
             Prompt = prompt,
             CompletedAt = DateTime.Now
         };
 
         var resultPath = Path.Combine(AppPaths.HairRequests, $"{request.Id:N}-result.json");
+
         await File.WriteAllTextAsync(
             resultPath,
             JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
 
-        AppLog.Write($"Hairstyle result saved: {outputPath}");
+        AppLog.Write($"Local hairstyle result saved: {outputPath}");
         return result;
     }
 
     private static string BuildGenerationPrompt(HairTryOnRequest request)
     {
-        var referenceInstruction =
-            !string.IsNullOrWhiteSpace(request.ReferencePath) && File.Exists(request.ReferencePath)
-                ? """
-                  
-                  The FIRST image is the person to edit. The SECOND image is a hairstyle reference only.
-                  Use the second image only for the haircut, shape, fringe, texture and volume.
-                  Do not copy the second person's face, identity, skin, clothing, background or pose.
-                  """
-                : "";
+        var settings = request.Settings;
+        var fringe = settings.Fringe.Equals("None", StringComparison.OrdinalIgnoreCase)
+            ? "no fringe"
+            : $"{settings.Fringe.ToLowerInvariant()} fringe";
 
-        return $"""
-                Edit the FIRST image as a photorealistic virtual hairstyle try-on.
-
-                {request.Prompt}
-
-                Critical requirements:
-                - Keep the person recognisably the exact same person.
-                - Preserve facial identity and facial features with high fidelity.
-                - Preserve expression, eyes, eyebrows, nose, lips, skin, ears and visible tattoos.
-                - Preserve body, clothing, pose, camera angle, lighting and background.
-                - Change only the hair and the immediately necessary hairline/occlusion around it.
-                - Make the new hairstyle physically believable for this head angle and lighting.
-                - Hair strands, edges, shadows and highlights must look photographic, not painted or pasted on.
-                - Do not beautify, age, de-age or reshape the face.
-                - Do not add makeup, jewellery, hats or accessories unless already present.
-                - Do not change another person visible in the background.
-                {referenceInstruction}
-                Return one finished photorealistic edited image.
-                """;
+        return
+            "photorealistic portrait photo, same exact person and same face, " +
+            $"new {settings.StyleFamily.ToLowerInvariant()} hairstyle, " +
+            $"{settings.Length.ToLowerInvariant()} length, {settings.Texture.ToLowerInvariant()} hair, " +
+            $"{fringe}, {settings.Volume.ToLowerInvariant()} volume, " +
+            "natural realistic hair strands, believable hairline, matching original lighting, " +
+            "keep eyes nose lips expression skin body clothing pose and background unchanged";
     }
 
-    private static void AddText(MultipartFormDataContent form, string name, string value)
-        => form.Add(new StringContent(value), name);
-
-    private static async Task AddImageAsync(
-        MultipartFormDataContent form,
-        string path,
-        CancellationToken cancellationToken)
+    private static string LastUsefulLines(string text)
     {
-        var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
-        var content = new ByteArrayContent(bytes);
-        content.Headers.ContentType = new MediaTypeHeaderValue(GetMimeType(path));
-        form.Add(content, "image[]", Path.GetFileName(path));
-    }
+        var lines = text
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .TakeLast(8);
 
-    private static string GetMimeType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
-    {
-        ".jpg" or ".jpeg" => "image/jpeg",
-        ".webp" => "image/webp",
-        _ => "image/png"
-    };
-
-    private static string ExtractApiError(string json)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("error", out var error) &&
-                error.TryGetProperty("message", out var message))
-            {
-                return message.GetString() ?? "Unknown API error.";
-            }
-        }
-        catch
-        {
-            // Fall through to a compact raw response.
-        }
-
-        var compact = json.Replace('\r', ' ').Replace('\n', ' ').Trim();
-        return compact.Length <= 500 ? compact : compact[..500] + "…";
+        var compact = string.Join(" | ", lines);
+        return compact.Length <= 900 ? compact : compact[^900..];
     }
 }
