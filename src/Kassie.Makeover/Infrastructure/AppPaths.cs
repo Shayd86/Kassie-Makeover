@@ -14,12 +14,16 @@ public static class AppPaths
     public static string Wardrobe => Path.Combine(Root, "wardrobe");
     public static string Hair => Path.Combine(Root, "hair");
     public static string HairReferences => Path.Combine(Hair, "references");
+    public static string HairInputs => Path.Combine(Hair, "inputs");
+    public static string HairOutputs => Path.Combine(Hair, "outputs");
+    public static string HairRequests => Path.Combine(Hair, "requests");
+    public static string HairModels => Path.Combine(Models, "hair");
     public static string Config => Path.Combine(Root, "config");
     public static string Logs => Path.Combine(Root, "logs");
 
     public static void Ensure()
     {
-        foreach (var path in new[] { Root, Models, Runtimes, Cache, Temp, Outputs, Exports, Wardrobe, Hair, HairReferences, Config, Logs })
+        foreach (var path in new[] { Root, Models, Runtimes, Cache, Temp, Outputs, Exports, Wardrobe, Hair, HairReferences, HairInputs, HairOutputs, HairRequests, HairModels, Config, Logs })
             Directory.CreateDirectory(path);
     }
 }
