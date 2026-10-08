@@ -74,8 +74,9 @@ public partial class MainWindow : System.Windows.Window
     private readonly HairService _hair = new();
     private readonly HairReferenceService _hairReferenceService = new();
     private readonly HairTryOnService _hairTryOn = new();
-    private readonly HairGenerationService _hairGeneration = new();
-    private readonly AiCredentialService _credentials = new();
+    private readonly LocalAiAssetService _localAiAssets = new();
+    private readonly HairSegmentationService _hairSegmentation;
+    private readonly HairGenerationService _hairGeneration;
     private readonly LookPresetService _lookService = new();
     private readonly WardrobeService _wardrobeService = new();
 
@@ -98,6 +99,9 @@ public partial class MainWindow : System.Windows.Window
 
     public MainWindow()
     {
+        _hairSegmentation = new HairSegmentationService(_localAiAssets);
+        _hairGeneration = new HairGenerationService(_localAiAssets, _hairSegmentation);
+
         InitializeComponent();
 
         LipColorCombo.ItemsSource = LipColors;
@@ -158,7 +162,7 @@ public partial class MainWindow : System.Windows.Window
 
         _hairReferences = _hairReferenceService.Load();
         RefreshHairReferences();
-        UpdateOpenAiKeyStatus();
+        UpdateLocalAiStatus();
 
         await RefreshCamerasAsync();
     }
@@ -695,52 +699,61 @@ public partial class MainWindow : System.Windows.Window
         HairstyleResultStatusText.Text = "Source ready. Generate a hairstyle to see the edited portrait here.";
     }
 
-    private void UpdateOpenAiKeyStatus()
+    private void UpdateLocalAiStatus()
     {
-        var key = _credentials.GetOpenAiApiKey();
-
-        if (string.IsNullOrWhiteSpace(key))
+        if (_localAiAssets.IsReady)
         {
-            OpenAiKeyStatusText.Text = "No API key saved. Hairstyle generation is disabled until you add one.";
-            OpenAiKeyStatusText.Foreground = (Brush)FindResource("PinkBrush");
+            LocalAiStatusText.Text = "Local hairstyle AI ready • no API key • no per-image charge.";
+            LocalAiStatusText.Foreground = (Brush)FindResource("CyanBrush");
+            GenerateHairstyleButton.IsEnabled = true;
+        }
+        else
+        {
+            LocalAiStatusText.Text = "Not installed yet. First setup downloads about 1.7 GB to D:\\Kassie\\Makeover.";
+            LocalAiStatusText.Foreground = (Brush)FindResource("PinkBrush");
+            GenerateHairstyleButton.IsEnabled = true;
+        }
+    }
+
+    private async void PrepareLocalAi_Click(object sender, RoutedEventArgs e)
+    {
+        if (_hairGenerationCts is not null)
             return;
-        }
 
-        OpenAiKeyStatusText.Text = _credentials.IsUsingEnvironmentKey()
-            ? "OpenAI API key found in OPENAI_API_KEY."
-            : "OpenAI API key saved securely for this Windows account.";
-        OpenAiKeyStatusText.Foreground = (Brush)FindResource("CyanBrush");
-    }
+        PrepareLocalAiButton.IsEnabled = false;
+        LocalAiProgress.Visibility = Visibility.Visible;
 
-    private void SaveOpenAiKey_Click(object sender, RoutedEventArgs e)
-    {
         try
         {
-            _credentials.SaveOpenAiApiKey(OpenAiApiKeyBox.Password);
-            OpenAiApiKeyBox.Clear();
-            UpdateOpenAiKeyStatus();
-            GlobalStatus.Text = "AI hairstyle key saved";
+            _hairGenerationCts = new CancellationTokenSource();
+            var progress = new Progress<string>(message =>
+            {
+                LocalAiStatusText.Text = message;
+                GlobalStatus.Text = message;
+            });
+
+            await _localAiAssets.EnsureReadyAsync(progress, _hairGenerationCts.Token);
+            UpdateLocalAiStatus();
+            GlobalStatus.Text = "Local hairstyle AI ready";
+        }
+        catch (OperationCanceledException)
+        {
+            LocalAiStatusText.Text = "Local AI setup cancelled. Any partial download is kept so it can resume.";
+            GlobalStatus.Text = "Local AI setup cancelled";
         }
         catch (Exception ex)
         {
-            OpenAiKeyStatusText.Text = ex.Message;
-            OpenAiKeyStatusText.Foreground = (Brush)FindResource("PinkBrush");
+            AppLog.Write($"Local AI setup failed: {ex}");
+            LocalAiStatusText.Text = ex.Message;
+            LocalAiStatusText.Foreground = (Brush)FindResource("PinkBrush");
+            GlobalStatus.Text = "Local AI setup failed";
         }
-    }
-
-    private void ForgetOpenAiKey_Click(object sender, RoutedEventArgs e)
-    {
-        try
+        finally
         {
-            _credentials.ForgetOpenAiApiKey();
-            OpenAiApiKeyBox.Clear();
-            UpdateOpenAiKeyStatus();
-            GlobalStatus.Text = "Saved AI hairstyle key removed";
-        }
-        catch (Exception ex)
-        {
-            OpenAiKeyStatusText.Text = ex.Message;
-            OpenAiKeyStatusText.Foreground = (Brush)FindResource("PinkBrush");
+            _hairGenerationCts?.Dispose();
+            _hairGenerationCts = null;
+            PrepareLocalAiButton.IsEnabled = true;
+            LocalAiProgress.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -750,14 +763,6 @@ public partial class MainWindow : System.Windows.Window
         {
             HairRenderStatusText.Text = "Capture or import a source portrait first.";
             GlobalStatus.Text = "Hairstyle source required";
-            return;
-        }
-
-        var apiKey = _credentials.GetOpenAiApiKey();
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            HairRenderStatusText.Text = "Add your OpenAI API key in step 4 first.";
-            GlobalStatus.Text = "AI hairstyle key required";
             return;
         }
 
@@ -771,16 +776,29 @@ public partial class MainWindow : System.Windows.Window
 
             _hairGenerationCts = new CancellationTokenSource();
             GenerateHairstyleButton.IsEnabled = false;
+            PrepareLocalAiButton.IsEnabled = false;
             CancelHairstyleButton.Visibility = Visibility.Visible;
             HairGenerationProgress.Visibility = Visibility.Visible;
             SaveHairResultButton.IsEnabled = false;
-            HairRenderStatusText.Text = $"Generating {request.Settings.StyleFamily} hairstyle… This can take a little while.";
-            HairstyleResultStatusText.Text = "Generating the new hair while preserving the face, pose, clothes and background…";
-            GlobalStatus.Text = "Generating hairstyle…";
+
+            var progress = new Progress<string>(message =>
+            {
+                HairRenderStatusText.Text = message;
+                LocalAiStatusText.Text = message;
+                GlobalStatus.Text = message;
+            });
+
+            HairRenderStatusText.Text =
+                _localAiAssets.IsReady
+                    ? $"Generating {request.Settings.StyleFamily} locally…"
+                    : "Setting up local AI first…";
+
+            HairstyleResultStatusText.Text =
+                "Kassie is finding the hair region and generating the new hairstyle on this PC.";
 
             var result = await _hairGeneration.GenerateAsync(
                 request,
-                apiKey,
+                progress,
                 _hairGenerationCts.Token);
 
             _lastHairResultPath = result.OutputPath;
@@ -789,20 +807,23 @@ public partial class MainWindow : System.Windows.Window
             SaveHairResultButton.IsEnabled = true;
 
             HairRenderStatusText.Text =
-                $"Done • {request.Settings.StyleFamily} • saved to {Path.GetFileName(result.OutputPath)}";
-            GlobalStatus.Text = "Hairstyle generated";
+                $"Done • {request.Settings.StyleFamily} • {result.Model}";
+            UpdateLocalAiStatus();
+            GlobalStatus.Text = "Hairstyle generated locally";
         }
         catch (OperationCanceledException)
         {
             HairRenderStatusText.Text = "Hairstyle generation cancelled.";
-            HairstyleResultStatusText.Text = "Generation was cancelled. Your source photo is unchanged.";
+            HairstyleResultStatusText.Text =
+                "Generation was cancelled. Partial downloads are kept so setup can resume.";
             GlobalStatus.Text = "Generation cancelled";
         }
         catch (Exception ex)
         {
-            AppLog.Write($"Hairstyle generation failed: {ex}");
+            AppLog.Write($"Local hairstyle generation failed: {ex}");
             HairRenderStatusText.Text = ex.Message;
-            HairstyleResultStatusText.Text = "Generation failed. Your source photo is unchanged.";
+            HairstyleResultStatusText.Text =
+                "Generation failed. Your source photo is unchanged; check D:\\Kassie\\Makeover\\logs for details.";
             GlobalStatus.Text = "Hairstyle generation failed";
         }
         finally
@@ -810,8 +831,10 @@ public partial class MainWindow : System.Windows.Window
             _hairGenerationCts?.Dispose();
             _hairGenerationCts = null;
             GenerateHairstyleButton.IsEnabled = true;
+            PrepareLocalAiButton.IsEnabled = true;
             CancelHairstyleButton.Visibility = Visibility.Collapsed;
             HairGenerationProgress.Visibility = Visibility.Collapsed;
+            LocalAiProgress.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -1149,6 +1172,7 @@ public partial class MainWindow : System.Windows.Window
 
         try { _camera.Dispose(); } catch (Exception ex) { AppLog.Camera($"Camera dispose fallback failed: {ex.Message}"); }
         try { _makeup.Dispose(); } catch { }
+        try { _hairSegmentation.Dispose(); } catch { }
 
         _shutdownComplete = true;
         AppLog.Camera("Camera shutdown complete. Closing WPF window.");
