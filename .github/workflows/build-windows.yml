@@ -1,0 +1,115 @@
+name: Build Kassie Makeover Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Get-Content VERSION.txt -Raw).Trim()
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Rebuild approved branding assets
+        shell: pwsh
+        run: |
+          $banner = (Get-ChildItem 'assets-source2\banner.*.b64' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
+          $icon = (Get-ChildItem 'assets-source2\icon.*.b64' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
+          [IO.File]::WriteAllBytes('src\Kassie.Makeover\Assets\kassie-makeover-approved.jpg', [Convert]::FromBase64String($banner))
+          [IO.File]::WriteAllBytes('src\Kassie.Makeover\Assets\app.ico', [Convert]::FromBase64String($icon))
+
+          $bannerHash = (Get-FileHash 'src\Kassie.Makeover\Assets\kassie-makeover-approved.jpg' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $iconHash = (Get-FileHash 'src\Kassie.Makeover\Assets\app.ico' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($bannerHash -ne '7d7f759fb9623b6e3e7337adddcd9ef37f6766d730e50a93bd966cd88705929d') { throw "Brand banner reconstruction failed: $bannerHash" }
+          if ($iconHash -ne 'd66e875b07ea757bc81d7c961582b88f56563cc0011a75e2418918ed2261ed00') { throw "App icon reconstruction failed: $iconHash" }
+
+      - name: Restore
+        run: dotnet restore src/Kassie.Makeover/Kassie.Makeover.csproj -r win-x64
+
+      - name: Publish self-contained Windows x64 EXE
+        run: >-
+          dotnet publish src/Kassie.Makeover/Kassie.Makeover.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -o publish
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:FileVersion=${{ steps.version.outputs.version }}.0
+          -p:AssemblyVersion=${{ steps.version.outputs.version }}.0
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          $exe = Join-Path $PWD 'publish\Kassie-Makeover.exe'
+          if (!(Test-Path $exe)) { throw "Published EXE not found: $exe" }
+          if ((Get-Item $exe).Length -lt 1MB) { throw "Published EXE is unexpectedly small." }
+          $vi = (Get-Item $exe).VersionInfo
+          Write-Host "FileVersion=$($vi.FileVersion) ProductVersion=$($vi.ProductVersion) Size=$((Get-Item $exe).Length)"
+          if (-not $vi.FileVersion.StartsWith($v)) { throw "Internal FileVersion does not match release $v" }
+
+      - name: Create Hub manifest and ZIP
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          $exe = Join-Path $PWD 'publish\Kassie-Makeover.exe'
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $manifest = [ordered]@{
+            app = 'kassie-makeover'
+            version = $v
+            exe = 'Kassie-Makeover.exe'
+            sha256 = $hash
+          } | ConvertTo-Json
+          Set-Content -Path publish\kassie-release.json -Value $manifest -Encoding UTF8
+          Compress-Archive -Path publish\Kassie-Makeover.exe,publish\kassie-release.json -DestinationPath "Kassie-Makeover-v$v.zip"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$v" installer\Kassie-Makeover.iss
+          Copy-Item "installer\output\Kassie-Makeover-Setup-v$v.exe" ".\Kassie-Makeover-Setup-v$v.exe"
+
+      - name: Create source archive
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          Compress-Archive -Path README.md,BUILDING.md,VERSION.txt,.github,installer,src,assets-source2 -DestinationPath "Kassie-Makeover-v$v-Source.zip"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kassie-Makeover-v${{ steps.version.outputs.version }}-Windows
+          if-no-files-found: error
+          path: |
+            Kassie-Makeover-v${{ steps.version.outputs.version }}.zip
+            Kassie-Makeover-Setup-v${{ steps.version.outputs.version }}.exe
+            Kassie-Makeover-v${{ steps.version.outputs.version }}-Source.zip
+            publish/Kassie-Makeover.exe
+            publish/kassie-release.json
