@@ -329,7 +329,7 @@
                                                 <StackPanel x:Name="HairstyleResultPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="22">
                                                     <TextBlock Text="✦" Foreground="{StaticResource CyanBrush}" FontSize="48" HorizontalAlignment="Center"/>
                                                     <TextBlock Text="Result area ready" Foreground="#D7DAED" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,0"/>
-                                                    <TextBlock x:Name="HairstyleResultStatusText" Text="Build a hairstyle request on the right. The still-image renderer will plug into this result panel." Foreground="#6E7696" FontSize="11" TextAlignment="Center" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                                    <TextBlock x:Name="HairstyleResultStatusText" Text="Choose a source photo and hairstyle, then click Generate hairstyle." Foreground="#6E7696" FontSize="11" TextAlignment="Center" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                                 </StackPanel>
                                             </Grid>
                                         </Border>
@@ -455,13 +455,31 @@
                                         </StackPanel>
                                     </Border>
 
+                                    <Border Background="{StaticResource PanelBrush}" BorderBrush="#2A3053" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <TextBlock Text="4. AI hairstyle engine" FontSize="16" FontWeight="Bold"/>
+                                            <TextBlock Text="Real hairstyle generation uses OpenAI image editing. Your API key is encrypted for this Windows account with DPAPI and is never written to the logs." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
+                                            <PasswordBox x:Name="OpenAiApiKeyBox" MinHeight="34" Padding="8,5"/>
+                                            <WrapPanel Margin="-4,8,0,0">
+                                                <Button Content="Save API key" Style="{StaticResource ActionButton}" Click="SaveOpenAiKey_Click"/>
+                                                <Button Content="Forget key" Style="{StaticResource ActionButton}" Click="ForgetOpenAiKey_Click"/>
+                                            </WrapPanel>
+                                            <TextBlock x:Name="OpenAiKeyStatusText" Text="No API key saved." Foreground="{StaticResource PinkBrush}" TextWrapping="Wrap" Margin="4,7,0,0" FontSize="11"/>
+                                        </StackPanel>
+                                    </Border>
+
                                     <Border Background="#0C1320" BorderBrush="#1D3A49" BorderThickness="1" CornerRadius="12" Padding="16">
                                         <StackPanel>
-                                            <TextBlock Text="4. Prepare the render" FontSize="16" FontWeight="Bold"/>
-                                            <TextBlock Text="v0.7 builds and saves the complete still-image hairstyle request. The generated result panel is already wired for the image renderer that comes next; it does not fake a haircut with another webcam blob." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
-                                            <Button Content="Prepare hairstyle render" Style="{StaticResource ActionButton}" Click="PrepareHairstyle_Click"/>
+                                            <TextBlock Text="5. Generate hairstyle" FontSize="16" FontWeight="Bold"/>
+                                            <TextBlock Text="Kassie sends the source portrait, your hairstyle choices and optional reference to the image-edit model, with high identity fidelity and instructions to change only the hair." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
+                                            <Button x:Name="GenerateHairstyleButton" Content="Generate hairstyle" Style="{StaticResource ActionButton}" Click="GenerateHairstyle_Click"/>
+                                            <Button x:Name="CancelHairstyleButton" Content="Cancel generation" Visibility="Collapsed" Style="{StaticResource ActionButton}" Click="CancelHairstyle_Click"/>
+                                            <ProgressBar x:Name="HairGenerationProgress" Height="6" Margin="4,9,4,0" IsIndeterminate="True" Visibility="Collapsed"/>
                                             <TextBlock x:Name="HairRenderStatusText" Text="Choose a source photo first." Foreground="{StaticResource CyanBrush}" TextWrapping="Wrap" Margin="4,8,0,0" FontSize="11"/>
-                                            <Button Content="Open hairstyle folder" Style="{StaticResource ActionButton}" Margin="0,8,0,0" Click="OpenHairFolder_Click"/>
+                                            <WrapPanel Margin="-4,8,0,0">
+                                                <Button x:Name="SaveHairResultButton" Content="Save a copy" IsEnabled="False" Style="{StaticResource ActionButton}" Click="SaveHairResult_Click"/>
+                                                <Button Content="Open hairstyle folder" Style="{StaticResource ActionButton}" Click="OpenHairFolder_Click"/>
+                                            </WrapPanel>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
