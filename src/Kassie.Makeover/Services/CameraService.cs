@@ -38,6 +38,8 @@ public sealed class CameraService : IDisposable
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<string>? Error;
 
+    public Action<Mat>? FrameProcessor { get; set; }
+
     public bool IsRunning => _captureTask is { IsCompleted: false };
 
     public bool Mirror
@@ -186,6 +188,15 @@ public sealed class CameraService : IDisposable
 
                 if (_mirror)
                     Cv2.Flip(frame, frame, FlipMode.Y);
+
+                try
+                {
+                    FrameProcessor?.Invoke(frame);
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Camera($"Frame processor error: {ex.Message}");
+                }
 
                 lock (_gate)
                 {
