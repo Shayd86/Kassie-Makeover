@@ -74,8 +74,10 @@ public partial class MainWindow : System.Windows.Window
     private readonly HairService _hair = new();
     private readonly HairReferenceService _hairReferenceService = new();
     private readonly HairTryOnService _hairTryOn = new();
+    private readonly HairHistoryService _hairHistoryService = new();
     private readonly LocalAiAssetService _localAiAssets = new();
     private readonly HairSegmentationService _hairSegmentation;
+    private readonly HairReferenceAnalysisService _hairReferenceAnalysis;
     private readonly HairGenerationService _hairGeneration;
     private readonly LookPresetService _lookService = new();
     private readonly WardrobeService _wardrobeService = new();
@@ -87,8 +89,11 @@ public partial class MainWindow : System.Windows.Window
     private List<LookPreset> _looks = [];
     private List<WardrobeItem> _wardrobe = [];
     private List<HairReference> _hairReferences = [];
+    private List<HairGenerationResult> _hairHistory = [];
     private string? _hairSourcePath;
     private string? _lastHairResultPath;
+    private HairGenerationResult? _selectedHairResult;
+    private Guid? _parentHairResultId;
     private CancellationTokenSource? _hairGenerationCts;
     private string _hairMode = "Hairstyles";
     private string _activePage = "Live Mirror";
@@ -100,7 +105,8 @@ public partial class MainWindow : System.Windows.Window
     public MainWindow()
     {
         _hairSegmentation = new HairSegmentationService(_localAiAssets);
-        _hairGeneration = new HairGenerationService(_localAiAssets, _hairSegmentation);
+        _hairReferenceAnalysis = new HairReferenceAnalysisService(_hairSegmentation);
+        _hairGeneration = new HairGenerationService(_localAiAssets, _hairSegmentation, _hairReferenceAnalysis);
 
         InitializeComponent();
 
@@ -120,6 +126,8 @@ public partial class MainWindow : System.Windows.Window
         HairTextureCombo.ItemsSource = new[] { "Straight", "Wavy", "Curly", "Coily" };
         HairFringeCombo.ItemsSource = new[] { "None", "Soft", "Full", "Curtain", "Side" };
         HairVolumeCombo.ItemsSource = new[] { "Low", "Natural", "High" };
+        HairStrengthCombo.ItemsSource = new[] { "Conservative", "Balanced", "Strong" };
+        HairQualityCombo.ItemsSource = new[] { "Fast", "Normal", "High" };
 
         LipColorCombo.SelectedIndex = 0;
         BlushColorCombo.SelectedIndex = 0;
@@ -137,6 +145,8 @@ public partial class MainWindow : System.Windows.Window
         HairTextureCombo.SelectedItem = "Wavy";
         HairFringeCombo.SelectedItem = "None";
         HairVolumeCombo.SelectedItem = "Natural";
+        HairStrengthCombo.SelectedItem = "Balanced";
+        HairQualityCombo.SelectedItem = "Normal";
 
         _camera.FrameProcessor = ProcessFrame;
         _camera.FrameReady += Camera_FrameReady;
@@ -162,6 +172,9 @@ public partial class MainWindow : System.Windows.Window
 
         _hairReferences = _hairReferenceService.Load();
         RefreshHairReferences();
+
+        _hairHistory = _hairHistoryService.Load();
+        RefreshHairHistory();
         UpdateLocalAiStatus();
 
         await RefreshCamerasAsync();
@@ -392,6 +405,8 @@ public partial class MainWindow : System.Windows.Window
             Texture = HairTextureCombo.SelectedItem as string ?? "Wavy",
             Fringe = HairFringeCombo.SelectedItem as string ?? "None",
             Volume = HairVolumeCombo.SelectedItem as string ?? "Natural",
+            StrengthHint = HairStrengthCombo.SelectedItem as string ?? "Balanced",
+            QualityHint = HairQualityCombo.SelectedItem as string ?? "Normal",
             ReferencePath = _hairSettings.ReferencePath
         };
 
@@ -419,6 +434,8 @@ public partial class MainWindow : System.Windows.Window
             HairTextureCombo.SelectedItem = settings.Texture;
             HairFringeCombo.SelectedItem = settings.Fringe;
             HairVolumeCombo.SelectedItem = settings.Volume;
+            HairStrengthCombo.SelectedItem = settings.StrengthHint;
+            HairQualityCombo.SelectedItem = settings.QualityHint;
             _hairSettings = settings;
         }
         finally
@@ -446,6 +463,15 @@ public partial class MainWindow : System.Windows.Window
             SelectedHairReferenceText.Text = _hairReferences.Count == 0
                 ? "No reference yet. Add a hairstyle photo you like."
                 : "Choose a reference and click Use selected.";
+    }
+
+    private void RefreshHairHistory()
+    {
+        HairHistoryList.ItemsSource = null;
+        HairHistoryList.ItemsSource = _hairHistory
+            .Where(x => File.Exists(x.OutputPath))
+            .OrderByDescending(x => x.CompletedAt)
+            .ToList();
     }
 
     private void RefreshLooks()
@@ -674,20 +700,25 @@ public partial class MainWindow : System.Windows.Window
     private void ClearHairstyleSource_Click(object sender, RoutedEventArgs e)
     {
         _hairSourcePath = null;
+        _parentHairResultId = null;
+        _selectedHairResult = null;
         HairstyleSourceImage.Source = null;
         HairstyleSourcePlaceholder.Visibility = Visibility.Visible;
         HairstyleResultImage.Source = null;
         HairstyleResultPlaceholder.Visibility = Visibility.Visible;
         _lastHairResultPath = null;
+        _selectedHairResult = null;
         SaveHairResultButton.IsEnabled = false;
+        UseHairResultAsSourceButton.IsEnabled = false;
         HairSourceStatusText.Text = "No source photo selected.";
         HairRenderStatusText.Text = "Choose a source photo first.";
         HairstyleResultStatusText.Text = "Choose a source photo and hairstyle, then click Generate hairstyle.";
     }
 
-    private void SetHairstyleSource(string path, string description)
+    private void SetHairstyleSource(string path, string description, Guid? parentResultId = null)
     {
         _hairSourcePath = path;
+        _parentHairResultId = parentResultId;
         HairstyleSourceImage.Source = LoadBitmapUnlocked(path);
         HairstyleSourcePlaceholder.Visibility = Visibility.Collapsed;
         HairstyleResultImage.Source = null;
