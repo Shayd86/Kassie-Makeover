@@ -457,21 +457,18 @@
 
                                     <Border Background="{StaticResource PanelBrush}" BorderBrush="#2A3053" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
                                         <StackPanel>
-                                            <TextBlock Text="4. AI hairstyle engine" FontSize="16" FontWeight="Bold"/>
-                                            <TextBlock Text="Real hairstyle generation uses OpenAI image editing. Your API key is encrypted for this Windows account with DPAPI and is never written to the logs." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
-                                            <PasswordBox x:Name="OpenAiApiKeyBox" MinHeight="34" Padding="8,5"/>
-                                            <WrapPanel Margin="-4,8,0,0">
-                                                <Button Content="Save API key" Style="{StaticResource ActionButton}" Click="SaveOpenAiKey_Click"/>
-                                                <Button Content="Forget key" Style="{StaticResource ActionButton}" Click="ForgetOpenAiKey_Click"/>
-                                            </WrapPanel>
-                                            <TextBlock x:Name="OpenAiKeyStatusText" Text="No API key saved." Foreground="{StaticResource PinkBrush}" TextWrapping="Wrap" Margin="4,7,0,0" FontSize="11"/>
+                                            <TextBlock Text="4. Local AI engine" FontSize="16" FontWeight="Bold"/>
+                                            <TextBlock Text="No API key. No subscription. No per-image charge. First use downloads a lightweight Windows AI runtime, a quantized hairstyle model (about 1.6 GB), and a small hair-segmentation model to D:\Kassie\Makeover." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
+                                            <Button x:Name="PrepareLocalAiButton" Content="Prepare local AI" Style="{StaticResource ActionButton}" Click="PrepareLocalAi_Click"/>
+                                            <ProgressBar x:Name="LocalAiProgress" Height="6" Margin="4,9,4,0" IsIndeterminate="True" Visibility="Collapsed"/>
+                                            <TextBlock x:Name="LocalAiStatusText" Text="Local hairstyle AI not checked yet." Foreground="{StaticResource CyanBrush}" TextWrapping="Wrap" Margin="4,8,0,0" FontSize="11"/>
                                         </StackPanel>
                                     </Border>
 
                                     <Border Background="#0C1320" BorderBrush="#1D3A49" BorderThickness="1" CornerRadius="12" Padding="16">
                                         <StackPanel>
                                             <TextBlock Text="5. Generate hairstyle" FontSize="16" FontWeight="Bold"/>
-                                            <TextBlock Text="Kassie sends the source portrait, your hairstyle choices and optional reference to the image-edit model, with high identity fidelity and instructions to change only the hair." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
+                                            <TextBlock Text="Kassie segments the hair locally, protects the recognised face, then runs the edit on your own PC. A 4 GB GPU is treated as low-VRAM: text encoding and VAE work are offloaded to system RAM automatically." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
                                             <Button x:Name="GenerateHairstyleButton" Content="Generate hairstyle" Style="{StaticResource ActionButton}" Click="GenerateHairstyle_Click"/>
                                             <Button x:Name="CancelHairstyleButton" Content="Cancel generation" Visibility="Collapsed" Style="{StaticResource ActionButton}" Click="CancelHairstyle_Click"/>
                                             <ProgressBar x:Name="HairGenerationProgress" Height="6" Margin="4,9,4,0" IsIndeterminate="True" Visibility="Collapsed"/>
