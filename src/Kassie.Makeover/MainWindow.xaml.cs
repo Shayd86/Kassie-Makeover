@@ -724,7 +724,10 @@ public partial class MainWindow : System.Windows.Window
         HairstyleResultImage.Source = null;
         HairstyleResultPlaceholder.Visibility = Visibility.Visible;
         _lastHairResultPath = null;
+        _selectedHairResult = null;
         SaveHairResultButton.IsEnabled = false;
+        UseHairResultAsSourceButton.IsEnabled = false;
+        HairDiagnosticStatusText.Text = "Generate a hairstyle to create diagnostic masks.";
         HairSourceStatusText.Text = $"{description} • {Path.GetFileName(path)}";
         HairRenderStatusText.Text = "Source ready. Choose a hairstyle and click Generate hairstyle.";
         HairstyleResultStatusText.Text = "Source ready. Generate a hairstyle to see the edited portrait here.";
@@ -732,18 +735,26 @@ public partial class MainWindow : System.Windows.Window
 
     private void UpdateLocalAiStatus()
     {
+        var gpu = _localAiAssets.GetVulkanCli() is not null ? "Vulkan ready" : "Vulkan missing";
+        var cpu = _localAiAssets.GetCpuCli() is not null ? "CPU fallback ready" : "CPU fallback missing";
+        var model = File.Exists(_localAiAssets.ModelPath) ? "model ready" : "model missing";
+        var segmenter = File.Exists(_localAiAssets.SegmenterPath) ? "segmenter ready" : "segmenter missing";
+
         if (_localAiAssets.IsReady)
         {
-            LocalAiStatusText.Text = "Local hairstyle AI ready • no API key • no per-image charge.";
+            LocalAiStatusText.Text =
+                $"Local AI ready • {gpu} • {cpu} • {model} • {segmenter} • £0 per image";
             LocalAiStatusText.Foreground = (Brush)FindResource("CyanBrush");
-            GenerateHairstyleButton.IsEnabled = true;
         }
         else
         {
-            LocalAiStatusText.Text = "Not installed yet. First setup downloads about 1.7 GB to D:\\Kassie\\Makeover.";
+            LocalAiStatusText.Text =
+                $"Setup needed • {gpu} • {cpu} • {model} • {segmenter}. First setup downloads assets to D:\\Kassie\\Makeover.";
             LocalAiStatusText.Foreground = (Brush)FindResource("PinkBrush");
-            GenerateHairstyleButton.IsEnabled = true;
         }
+
+        GenerateHairstyleButton.IsEnabled = true;
+        GenerateThreeButton.IsEnabled = true;
     }
 
     private async void PrepareLocalAi_Click(object sender, RoutedEventArgs e)
@@ -789,6 +800,12 @@ public partial class MainWindow : System.Windows.Window
     }
 
     private async void GenerateHairstyle_Click(object sender, RoutedEventArgs e)
+        => await GenerateHairstylesAsync(1);
+
+    private async void GenerateThreeHairstyles_Click(object sender, RoutedEventArgs e)
+        => await GenerateHairstylesAsync(3);
+
+    private async Task GenerateHairstylesAsync(int count)
     {
         if (string.IsNullOrWhiteSpace(_hairSourcePath) || !File.Exists(_hairSourcePath))
         {
@@ -800,61 +817,84 @@ public partial class MainWindow : System.Windows.Window
         if (_hairGenerationCts is not null)
             return;
 
+        UpdateHairSettings();
+        var batchId = count > 1 ? Guid.NewGuid() : (Guid?)null;
+
         try
         {
-            UpdateHairSettings();
-            var request = _hairTryOn.Prepare(_hairSourcePath, _hairSettings);
-
             _hairGenerationCts = new CancellationTokenSource();
             GenerateHairstyleButton.IsEnabled = false;
+            GenerateThreeButton.IsEnabled = false;
             PrepareLocalAiButton.IsEnabled = false;
             CancelHairstyleButton.Visibility = Visibility.Visible;
             HairGenerationProgress.Visibility = Visibility.Visible;
             SaveHairResultButton.IsEnabled = false;
+            UseHairResultAsSourceButton.IsEnabled = false;
 
-            var progress = new Progress<string>(message =>
+            for (var index = 0; index < count; index++)
             {
-                HairRenderStatusText.Text = message;
-                LocalAiStatusText.Text = message;
-                GlobalStatus.Text = message;
-            });
+                _hairGenerationCts.Token.ThrowIfCancellationRequested();
 
-            HairRenderStatusText.Text =
-                _localAiAssets.IsReady
-                    ? $"Generating {request.Settings.StyleFamily} locally…"
-                    : "Setting up local AI first…";
+                var number = index + 1;
+                var request = _hairTryOn.Prepare(_hairSourcePath, _hairSettings);
+                var seed = Random.Shared.NextInt64(1, int.MaxValue);
 
-            HairstyleResultStatusText.Text =
-                "Kassie is finding the hair region and generating the new hairstyle on this PC.";
+                var progress = new Progress<string>(message =>
+                {
+                    var prefix = count > 1 ? $"Variation {number} of {count} • " : "";
+                    HairRenderStatusText.Text = prefix + message;
+                    LocalAiStatusText.Text = message;
+                    GlobalStatus.Text = prefix + message;
+                });
 
-            var result = await _hairGeneration.GenerateAsync(
-                request,
-                progress,
-                _hairGenerationCts.Token);
+                HairRenderStatusText.Text =
+                    count > 1
+                        ? $"Generating variation {number} of {count}…"
+                        : (_localAiAssets.IsReady
+                            ? $"Generating {request.Settings.StyleFamily} locally…"
+                            : "Setting up local AI first…");
 
-            _lastHairResultPath = result.OutputPath;
-            HairstyleResultImage.Source = LoadBitmapUnlocked(result.OutputPath);
-            HairstyleResultPlaceholder.Visibility = Visibility.Collapsed;
-            SaveHairResultButton.IsEnabled = true;
+                HairstyleResultStatusText.Text =
+                    "Kassie is finding the hair region and changing only the hairstyle on this PC.";
 
-            HairRenderStatusText.Text =
-                $"Done • {request.Settings.StyleFamily} • {result.Model}";
+                var result = await _hairGeneration.GenerateAsync(
+                    request,
+                    seed,
+                    batchId,
+                    _parentHairResultId,
+                    progress,
+                    _hairGenerationCts.Token);
+
+                _hairHistory.RemoveAll(x => x.Id == result.Id);
+                _hairHistory.Insert(0, result);
+                _hairHistoryService.Save(_hairHistory);
+                RefreshHairHistory();
+                DisplayHairResult(result);
+
+                HairRenderStatusText.Text =
+                    count > 1
+                        ? $"Variation {number} of {count} complete • seed {result.Seed}"
+                        : $"Done • {request.Settings.StyleFamily} • seed {result.Seed}";
+            }
+
             UpdateLocalAiStatus();
-            GlobalStatus.Text = "Hairstyle generated locally";
+            GlobalStatus.Text = count > 1
+                ? $"{count} hairstyle variations generated"
+                : "Hairstyle generated locally";
         }
         catch (OperationCanceledException)
         {
             HairRenderStatusText.Text = "Hairstyle generation cancelled.";
             HairstyleResultStatusText.Text =
-                "Generation was cancelled. Partial downloads are kept so setup can resume.";
+                "Generation was cancelled. Completed variations are still in Recent hairstyle results.";
             GlobalStatus.Text = "Generation cancelled";
         }
         catch (Exception ex)
         {
-            AppLog.Write($"Local hairstyle generation failed: {ex}");
+            AppLog.HairAi($"Local hairstyle generation failed: {ex}");
             HairRenderStatusText.Text = ex.Message;
             HairstyleResultStatusText.Text =
-                "Generation failed. Your source photo is unchanged; check D:\\Kassie\\Makeover\\logs for details.";
+                "Generation failed. Your source photo is unchanged; details are in D:\\Kassie\\Makeover\\logs\\hair-ai.log.";
             GlobalStatus.Text = "Hairstyle generation failed";
         }
         finally
@@ -862,11 +902,30 @@ public partial class MainWindow : System.Windows.Window
             _hairGenerationCts?.Dispose();
             _hairGenerationCts = null;
             GenerateHairstyleButton.IsEnabled = true;
+            GenerateThreeButton.IsEnabled = true;
             PrepareLocalAiButton.IsEnabled = true;
             CancelHairstyleButton.Visibility = Visibility.Collapsed;
             HairGenerationProgress.Visibility = Visibility.Collapsed;
             LocalAiProgress.Visibility = Visibility.Collapsed;
         }
+    }
+
+    private void DisplayHairResult(HairGenerationResult result)
+    {
+        if (!File.Exists(result.OutputPath))
+        {
+            GlobalStatus.Text = "That hairstyle result file is missing";
+            return;
+        }
+
+        _selectedHairResult = result;
+        _lastHairResultPath = result.OutputPath;
+        HairstyleResultImage.Source = LoadBitmapUnlocked(result.OutputPath);
+        HairstyleResultPlaceholder.Visibility = Visibility.Collapsed;
+        SaveHairResultButton.IsEnabled = true;
+        UseHairResultAsSourceButton.IsEnabled = true;
+        HairDiagnosticStatusText.Text =
+            $"Result selected • {result.Settings.StyleFamily} • seed {result.Seed} • {result.QualityPreset}/{result.StrengthPreset}";
     }
 
     private void CancelHairstyle_Click(object sender, RoutedEventArgs e)
@@ -899,6 +958,136 @@ public partial class MainWindow : System.Windows.Window
         catch (Exception ex)
         {
             GlobalStatus.Text = $"Could not save result: {ex.Message}";
+        }
+    }
+
+    private void UseHairResultAsSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedHairResult is null || !File.Exists(_selectedHairResult.OutputPath))
+        {
+            GlobalStatus.Text = "Choose a generated result first";
+            return;
+        }
+
+        var result = _selectedHairResult;
+        ApplyHairSettingsToUi(result.Settings);
+        SetHairstyleSource(result.OutputPath, "Refining generated hairstyle", result.Id);
+        GlobalStatus.Text = "Result is now the source • adjust the style and generate again";
+    }
+
+    private void HairHistoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (HairHistoryList.SelectedItem is HairGenerationResult result)
+            HairDiagnosticStatusText.Text = $"Selected history result • {result.Summary} • seed {result.Seed}";
+    }
+
+    private void ViewHairHistory_Click(object sender, RoutedEventArgs e)
+    {
+        if (HairHistoryList.SelectedItem is not HairGenerationResult result)
+        {
+            GlobalStatus.Text = "Choose a hairstyle result first";
+            return;
+        }
+
+        DisplayHairResult(result);
+        HairCompareMode_Click(new Button { Tag = "SideBySide" }, new RoutedEventArgs());
+        GlobalStatus.Text = "History result opened";
+    }
+
+    private void UseHistoryAsSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (HairHistoryList.SelectedItem is not HairGenerationResult result ||
+            !File.Exists(result.OutputPath))
+        {
+            GlobalStatus.Text = "Choose a hairstyle result first";
+            return;
+        }
+
+        ApplyHairSettingsToUi(result.Settings);
+        SetHairstyleSource(result.OutputPath, "Refining history result", result.Id);
+        GlobalStatus.Text = "History result is now the source";
+    }
+
+    private void RemoveHairHistory_Click(object sender, RoutedEventArgs e)
+    {
+        if (HairHistoryList.SelectedItem is not HairGenerationResult result)
+        {
+            GlobalStatus.Text = "Choose a hairstyle result first";
+            return;
+        }
+
+        _hairHistory.RemoveAll(x => x.Id == result.Id);
+        _hairHistoryService.Save(_hairHistory);
+        RefreshHairHistory();
+        GlobalStatus.Text = "Removed from history • image kept on disk";
+    }
+
+    private void HairDiagnosticView_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedHairResult is null)
+        {
+            GlobalStatus.Text = "Generate or open a hairstyle result first";
+            return;
+        }
+
+        if (sender is not Button button || button.Tag is not string view)
+            return;
+
+        var path = view switch
+        {
+            "HairMask" => _selectedHairResult.HairMaskPath,
+            "FaceMask" => _selectedHairResult.FaceMaskPath,
+            "EditMask" => _selectedHairResult.EditMaskPath,
+            _ => _selectedHairResult.OutputPath
+        };
+
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            HairDiagnosticStatusText.Text = "That diagnostic image is not available for this result.";
+            return;
+        }
+
+        HairstyleResultImage.Source = LoadBitmapUnlocked(path);
+        HairstyleResultPlaceholder.Visibility = Visibility.Collapsed;
+        HairDiagnosticStatusText.Text = view switch
+        {
+            "HairMask" => "Showing detected hair mask.",
+            "FaceMask" => "Showing protected face mask.",
+            "EditMask" => "Showing final editable/inpaint region.",
+            _ => $"Showing generated result • seed {_selectedHairResult.Seed}."
+        };
+    }
+
+    private void HairCompareMode_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string mode)
+            return;
+
+        switch (mode)
+        {
+            case "Before":
+                HairSourceBorder.Visibility = Visibility.Visible;
+                HairResultBorder.Visibility = Visibility.Collapsed;
+                HairSourceColumn.Width = new GridLength(1, GridUnitType.Star);
+                HairSpacerColumn.Width = new GridLength(0);
+                HairResultColumn.Width = new GridLength(0);
+                break;
+
+            case "After":
+                HairSourceBorder.Visibility = Visibility.Collapsed;
+                HairResultBorder.Visibility = Visibility.Visible;
+                HairSourceColumn.Width = new GridLength(0);
+                HairSpacerColumn.Width = new GridLength(0);
+                HairResultColumn.Width = new GridLength(1, GridUnitType.Star);
+                break;
+
+            default:
+                HairSourceBorder.Visibility = Visibility.Visible;
+                HairResultBorder.Visibility = Visibility.Visible;
+                HairSourceColumn.Width = new GridLength(1, GridUnitType.Star);
+                HairSpacerColumn.Width = new GridLength(14);
+                HairResultColumn.Width = new GridLength(1, GridUnitType.Star);
+                break;
         }
     }
 
