@@ -757,6 +757,29 @@ public partial class MainWindow : System.Windows.Window
         GenerateThreeButton.IsEnabled = true;
     }
 
+    private void RecheckLocalAi_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateLocalAiStatus();
+        GlobalStatus.Text = _localAiAssets.IsReady ? "Local AI ready" : "Local AI setup incomplete";
+    }
+
+    private void OpenLocalAiFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string target)
+            return;
+
+        AppPaths.Ensure();
+        var path = target switch
+        {
+            "Models" => AppPaths.HairModels,
+            "Runtime" => _localAiAssets.RuntimeRoot,
+            _ => AppPaths.Logs
+        };
+
+        Directory.CreateDirectory(path);
+        Process.Start(new ProcessStartInfo("explorer.exe", path) { UseShellExecute = true });
+    }
+
     private async void PrepareLocalAi_Click(object sender, RoutedEventArgs e)
     {
         if (_hairGenerationCts is not null)
@@ -1035,6 +1058,7 @@ public partial class MainWindow : System.Windows.Window
 
         var path = view switch
         {
+            "Source" => _selectedHairResult.SourcePath,
             "HairMask" => _selectedHairResult.HairMaskPath,
             "FaceMask" => _selectedHairResult.FaceMaskPath,
             "EditMask" => _selectedHairResult.EditMaskPath,
@@ -1051,6 +1075,7 @@ public partial class MainWindow : System.Windows.Window
         HairstyleResultPlaceholder.Visibility = Visibility.Collapsed;
         HairDiagnosticStatusText.Text = view switch
         {
+            "Source" => "Showing the source image used for this result.",
             "HairMask" => "Showing detected hair mask.",
             "FaceMask" => "Showing protected face mask.",
             "EditMask" => "Showing final editable/inpaint region.",
