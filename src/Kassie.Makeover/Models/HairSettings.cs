@@ -12,5 +12,7 @@ public sealed record HairSettings
     public string Texture { get; init; } = "Wavy";
     public string Fringe { get; init; } = "None";
     public string Volume { get; init; } = "Natural";
+    public string StrengthHint { get; init; } = "Balanced";
+    public string QualityHint { get; init; } = "Normal";
     public string? ReferencePath { get; init; }
 }
