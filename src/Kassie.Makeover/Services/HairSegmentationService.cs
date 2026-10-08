@@ -55,10 +55,23 @@ public sealed class HairSegmentationService : IDisposable
             }
         }
 
+        var inputName = _session.InputMetadata.Keys.FirstOrDefault()
+            ?? throw new InvalidOperationException("Hair segmenter has no input.");
+
         using var results = _session.Run(
-            new[] { NamedOnnxValue.CreateFromTensor("input_29", input) });
+            new[] { NamedOnnxValue.CreateFromTensor(inputName, input) });
 
         var logits = results.First().AsTensor<float>();
+
+        if (logits.Dimensions.Count != 4 ||
+            logits.Dimensions[0] != 1 ||
+            logits.Dimensions[1] != 256 ||
+            logits.Dimensions[2] != 256 ||
+            logits.Dimensions[3] < 6)
+        {
+            throw new InvalidOperationException(
+                $"Unexpected hair-segmentation output shape: [{string.Join(", ", logits.Dimensions)}].");
+        }
         using var hair = new Mat(256, 256, MatType.CV_8UC1, Scalar.Black);
         using var face = new Mat(256, 256, MatType.CV_8UC1, Scalar.Black);
 
@@ -67,11 +80,14 @@ public sealed class HairSegmentationService : IDisposable
         var maxX = -1;
         var maxY = -1;
 
+        // Allocate this once. Repeated stackalloc inside 65,536 loop iterations can
+        // exhaust the process stack and terminate the app before normal exception handling runs.
+        Span<float> values = stackalloc float[6];
+
         for (var y = 0; y < 256; y++)
         {
             for (var x = 0; x < 256; x++)
             {
-                Span<float> values = stackalloc float[6];
                 var maxLogit = float.NegativeInfinity;
 
                 for (var cls = 0; cls < 6; cls++)
