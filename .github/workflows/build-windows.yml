@@ -30,18 +30,17 @@ jobs:
           $v = (Get-Content VERSION.txt -Raw).Trim()
           "version=$v" >> $env:GITHUB_OUTPUT
 
-      - name: Rebuild approved branding assets
+      - name: Verify approved branding assets
         shell: pwsh
         run: |
-          $banner = (Get-ChildItem 'assets-source2\banner.*.b64' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
-          $icon = (Get-ChildItem 'assets-source2\icon.*.b64' | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
-          [IO.File]::WriteAllBytes('src\Kassie.Makeover\Assets\kassie-makeover-approved.jpg', [Convert]::FromBase64String($banner))
-          [IO.File]::WriteAllBytes('src\Kassie.Makeover\Assets\app.ico', [Convert]::FromBase64String($icon))
-
-          $bannerHash = (Get-FileHash 'src\Kassie.Makeover\Assets\kassie-makeover-approved.jpg' -Algorithm SHA256).Hash.ToLowerInvariant()
-          $iconHash = (Get-FileHash 'src\Kassie.Makeover\Assets\app.ico' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($bannerHash -ne '7d7f759fb9623b6e3e7337adddcd9ef37f6766d730e50a93bd966cd88705929d') { throw "Brand banner reconstruction failed: $bannerHash" }
-          if ($iconHash -ne 'd66e875b07ea757bc81d7c961582b88f56563cc0011a75e2418918ed2261ed00') { throw "App icon reconstruction failed: $iconHash" }
+          $banner = 'src\Kassie.Makeover\Assets\kassie-makeover-approved.jpg'
+          $icon = 'src\Kassie.Makeover\Assets\app.ico'
+          if (!(Test-Path $banner)) { throw "Makeover banner is missing." }
+          if (!(Test-Path $icon)) { throw "Makeover icon is missing." }
+          $bannerHash = (Get-FileHash $banner -Algorithm SHA256).Hash.ToLowerInvariant()
+          $iconHash = (Get-FileHash $icon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($bannerHash -ne '6f78dcc8a10f36f3a278ed986476287c98074ac61b5603b2f8bfe4d10cb3669d') { throw "Unexpected Makeover banner: $bannerHash" }
+          if ($iconHash -ne 'd66e875b07ea757bc81d7c961582b88f56563cc0011a75e2418918ed2261ed00') { throw "Unexpected Makeover icon: $iconHash" }
 
       - name: Restore
         run: dotnet restore src/Kassie.Makeover/Kassie.Makeover.csproj -r win-x64
@@ -100,7 +99,7 @@ jobs:
         shell: pwsh
         run: |
           $v = '${{ steps.version.outputs.version }}'
-          Compress-Archive -Path README.md,BUILDING.md,VERSION.txt,.github,installer,src,assets-source2 -DestinationPath "Kassie-Makeover-v$v-Source.zip"
+          Compress-Archive -Path README.md,BUILDING.md,VERSION.txt,.github,installer,src -DestinationPath "Kassie-Makeover-v$v-Source.zip"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
