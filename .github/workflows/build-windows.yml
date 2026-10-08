@@ -101,6 +101,13 @@ jobs:
           $v = '${{ steps.version.outputs.version }}'
           git archive --format=zip --output="Kassie-Makeover-v$v-Source.zip" HEAD
 
+      - name: Create local SelfBuild CMD
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          & .\tools\Make-SelfBuild.ps1 -Version $v -OutputPath ".\Kassie-Makeover-v$v-SelfBuild.cmd"
+          if (!(Test-Path ".\Kassie-Makeover-v$v-SelfBuild.cmd")) { throw "SelfBuild CMD was not created." }
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -110,6 +117,7 @@ jobs:
             Kassie-Makeover-v${{ steps.version.outputs.version }}.zip
             Kassie-Makeover-Setup-v${{ steps.version.outputs.version }}.exe
             Kassie-Makeover-v${{ steps.version.outputs.version }}-Source.zip
+            Kassie-Makeover-v${{ steps.version.outputs.version }}-SelfBuild.cmd
             publish/Kassie-Makeover.exe
             publish/kassie-release.json
 
@@ -124,11 +132,12 @@ jobs:
             "Kassie-Makeover-Setup-v$v.exe",
             "Kassie-Makeover-v$v.zip",
             "Kassie-Makeover-v$v-Source.zip",
+            "Kassie-Makeover-v$v-SelfBuild.cmd",
             "publish\Kassie-Makeover.exe"
           )
           gh release view $tag --repo "${{ github.repository }}" *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag @files --repo "${{ github.repository }}" --title "Kassie Makeover v$v" --notes "C# / WPF Windows x64 build. Standalone installer installs to F:\Kassie Makeover. Hub update ZIP follows the Kassie Hub release contract."
+            gh release create $tag @files --repo "${{ github.repository }}" --title "Kassie Makeover v$v" --notes "C# / WPF Windows x64 build. Standalone installer installs to F:\Kassie Makeover. Hub update ZIP follows the Kassie Hub release contract. SelfBuild CMD uses the same local native C# build flow as Kassie 3D."
           } else {
             gh release upload $tag @files --repo "${{ github.repository }}" --clobber
           }
