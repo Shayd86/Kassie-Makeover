@@ -30,8 +30,8 @@ public sealed class WardrobeService
     {
         AppPaths.Ensure();
         var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
-        if (extension is not (".jpg" or ".jpeg" or ".png" or ".webp" or ".bmp"))
-            throw new InvalidOperationException("Choose a JPG, PNG, WEBP or BMP image.");
+        if (extension is not (".jpg" or ".jpeg" or ".png" or ".bmp"))
+            throw new InvalidOperationException("Choose a JPG, PNG or BMP image.");
 
         var id = Guid.NewGuid();
         var target = Path.Combine(AppPaths.Wardrobe, $"{id:N}{extension}");
