@@ -12,17 +12,23 @@ public sealed class HairGenerationService
 {
     private readonly LocalAiAssetService _assets;
     private readonly HairSegmentationService _segmentation;
+    private readonly HairReferenceAnalysisService _referenceAnalysis;
 
     public HairGenerationService(
         LocalAiAssetService assets,
-        HairSegmentationService segmentation)
+        HairSegmentationService segmentation,
+        HairReferenceAnalysisService referenceAnalysis)
     {
         _assets = assets;
         _segmentation = segmentation;
+        _referenceAnalysis = referenceAnalysis;
     }
 
     public async Task<HairGenerationResult> GenerateAsync(
         HairTryOnRequest request,
+        long seed,
+        Guid? batchId = null,
+        Guid? parentResultId = null,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -31,32 +37,56 @@ public sealed class HairGenerationService
 
         await _assets.EnsureReadyAsync(progress, cancellationToken);
 
+        var options = new HairGenerationOptions
+        {
+            StrengthPreset = request.Settings.StrengthHint,
+            QualityPreset = request.Settings.QualityHint
+        };
+
+        var resultId = Guid.NewGuid();
         var workId = request.Id.ToString("N");
         var workingSource = Path.Combine(AppPaths.Temp, $"hair-source-{workId}.png");
-        var maskPath = Path.Combine(AppPaths.HairRequests, $"{workId}-mask.png");
+        var diagnosticsDirectory = Path.Combine(AppPaths.HairHistory, resultId.ToString("N"));
         var outputPath = Path.Combine(
             AppPaths.HairOutputs,
-            $"Hair-Result-{DateTime.Now:yyyyMMdd-HHmmss}-{workId}.png");
+            $"Hair-Result-{DateTime.Now:yyyyMMdd-HHmmss}-{resultId:N}.png");
+
+        Directory.CreateDirectory(diagnosticsDirectory);
 
         try
         {
             progress?.Report("Preparing portrait for local AI…");
             var size = await Task.Run(
-                () => PrepareWorkingImage(request.SourcePath, workingSource),
+                () => PrepareWorkingImage(request.SourcePath, workingSource, options.MaxSide),
                 cancellationToken);
 
-            progress?.Report("Finding the real hair and face regions…");
-            await Task.Run(
-                () => _segmentation.CreateEditMask(workingSource, request.Settings, maskPath),
+            progress?.Report("Finding hair, face and editable regions…");
+            var masks = await Task.Run(
+                () => _segmentation.CreateMasks(
+                    workingSource,
+                    request.Settings,
+                    diagnosticsDirectory,
+                    "generation"),
                 cancellationToken);
+
+            string? referenceGuidance = null;
+            if (!string.IsNullOrWhiteSpace(request.ReferencePath) &&
+                File.Exists(request.ReferencePath))
+            {
+                progress?.Report("Analysing hairstyle reference locally…");
+                referenceGuidance = await Task.Run(
+                    () => _referenceAnalysis.Analyse(request.ReferencePath),
+                    cancellationToken);
+            }
 
             progress?.Report("Generating hairstyle locally • GPU first…");
 
-            var prompt = BuildGenerationPrompt(request);
+            var prompt = BuildGenerationPrompt(request, referenceGuidance);
             var negative =
                 "different person, changed face, deformed face, distorted eyes, distorted mouth, " +
-                "extra face, extra person, hat, headwear, helmet, wig edge, plastic hair, painted hair, " +
-                "cartoon, illustration, low quality, blurry, bad anatomy";
+                "extra face, extra person, hat, headwear, helmet, obvious wig, wig edge, plastic hair, " +
+                "painted hair, cartoon, illustration, low quality, blurry, bad anatomy, changed clothing, " +
+                "changed background, changed skin tone";
 
             var vulkan = _assets.GetVulkanCli();
             var cpu = _assets.GetCpuCli();
@@ -72,20 +102,35 @@ public sealed class HairGenerationService
                     vulkan,
                     useGpu: true,
                     workingSource,
-                    maskPath,
+                    masks.EditMaskPath,
                     outputPath,
                     prompt,
                     negative,
                     size.Width,
                     size.Height,
+                    options,
+                    seed,
                     progress,
                     cancellationToken);
 
                 if (result.ExitCode == 0 && File.Exists(outputPath))
-                    return await FinishAsync(request, outputPath, prompt, "stable-diffusion.cpp Vulkan / SD1.5 Q4", cancellationToken);
+                {
+                    return await FinishAsync(
+                        resultId,
+                        request,
+                        outputPath,
+                        prompt,
+                        "stable-diffusion.cpp Vulkan / SD1.5 Q4",
+                        options,
+                        seed,
+                        batchId,
+                        parentResultId,
+                        masks,
+                        cancellationToken);
+                }
 
                 error = result.ErrorText;
-                AppLog.Write($"Vulkan hairstyle generation failed; trying CPU fallback. {error}");
+                AppLog.HairAi($"Vulkan hairstyle generation failed; trying CPU fallback. {error}");
                 progress?.Report("GPU path failed • retrying locally on CPU…");
             }
 
@@ -97,17 +142,32 @@ public sealed class HairGenerationService
                     cpu,
                     useGpu: false,
                     workingSource,
-                    maskPath,
+                    masks.EditMaskPath,
                     outputPath,
                     prompt,
                     negative,
                     size.Width,
                     size.Height,
+                    options,
+                    seed,
                     progress,
                     cancellationToken);
 
                 if (result.ExitCode == 0 && File.Exists(outputPath))
-                    return await FinishAsync(request, outputPath, prompt, "stable-diffusion.cpp CPU / SD1.5 Q4", cancellationToken);
+                {
+                    return await FinishAsync(
+                        resultId,
+                        request,
+                        outputPath,
+                        prompt,
+                        "stable-diffusion.cpp CPU / SD1.5 Q4",
+                        options,
+                        seed,
+                        batchId,
+                        parentResultId,
+                        masks,
+                        cancellationToken);
+                }
 
                 error = result.ErrorText;
             }
@@ -117,19 +177,23 @@ public sealed class HairGenerationService
                     ? "The local hairstyle engine stopped without creating an image."
                     : $"The local hairstyle engine failed: {LastUsefulLines(error)}");
         }
+        catch
+        {
+            AppLog.HairAi($"Generation {resultId:N} failed.");
+            throw;
+        }
         finally
         {
             try { if (File.Exists(workingSource)) File.Delete(workingSource); } catch { }
         }
     }
 
-    private static Size PrepareWorkingImage(string sourcePath, string outputPath)
+    private static Size PrepareWorkingImage(string sourcePath, string outputPath, int maxSide)
     {
         using var source = Cv2.ImRead(sourcePath, ImreadModes.Color);
         if (source.Empty())
             throw new InvalidOperationException("The source portrait could not be opened.");
 
-        const int maxSide = 640;
         var scale = Math.Min(1.0, maxSide / (double)Math.Max(source.Width, source.Height));
 
         var scaledWidth = Math.Max(256, (int)Math.Round(source.Width * scale));
@@ -161,6 +225,8 @@ public sealed class HairGenerationService
         string negativePrompt,
         int width,
         int height,
+        HairGenerationOptions options,
+        long seed,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
@@ -182,8 +248,9 @@ public sealed class HairGenerationService
         Add("-o"); Add(output);
         Add("-p"); Add(prompt);
         Add("-n"); Add(negativePrompt);
-        Add("--strength"); Add("0.72");
-        Add("--steps"); Add("24");
+        Add("--seed"); Add(seed.ToString());
+        Add("--strength"); Add(options.Strength.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+        Add("--steps"); Add(options.Steps.ToString());
         Add("--cfg-scale"); Add("6.5");
         Add("--sampling-method"); Add("euler_a");
         Add("--width"); Add(width.ToString());
@@ -196,7 +263,7 @@ public sealed class HairGenerationService
 
         if (useGpu)
         {
-            Add("--backend"); Add("gpu");
+            Add("--backend"); Add("diffusion=vulkan0,vae=cpu,te=cpu");
             Add("--max-vram"); Add("vulkan0=3.2");
         }
         else
@@ -221,7 +288,9 @@ public sealed class HairGenerationService
             ReportInterestingProgress(e.Data, progress);
         };
 
-        AppLog.Write($"Starting local hairstyle runtime: {Path.GetFileName(executable)} {(useGpu ? "GPU" : "CPU")}");
+        AppLog.HairAi(
+            $"Starting {Path.GetFileName(executable)} {(useGpu ? "GPU" : "CPU")} " +
+            $"seed={seed} strength={options.Strength:0.00} steps={options.Steps} size={width}x{height}");
 
         if (!process.Start())
             throw new InvalidOperationException("The local hairstyle process could not be started.");
@@ -248,7 +317,7 @@ public sealed class HairGenerationService
         string text;
         lock (log) text = log.ToString();
 
-        AppLog.Write($"Local hairstyle runtime exited {process.ExitCode}. {LastUsefulLines(text)}");
+        AppLog.HairAi($"Local hairstyle runtime exited {process.ExitCode}. {LastUsefulLines(text)}");
         return (process.ExitCode, text);
     }
 
@@ -256,7 +325,7 @@ public sealed class HairGenerationService
     {
         var lower = line.ToLowerInvariant();
 
-        if (lower.Contains("sampling") || lower.Contains("step "))
+        if (lower.Contains("generating image") || lower.Contains("sampling") || lower.Contains("step "))
             progress?.Report("Generating hairstyle locally…");
         else if (lower.Contains("loading") && lower.Contains("model"))
             progress?.Report("Loading local hairstyle model…");
@@ -265,18 +334,36 @@ public sealed class HairGenerationService
     }
 
     private static async Task<HairGenerationResult> FinishAsync(
+        Guid resultId,
         HairTryOnRequest request,
         string outputPath,
         string prompt,
         string model,
+        HairGenerationOptions options,
+        long seed,
+        Guid? batchId,
+        Guid? parentResultId,
+        HairSegmentationResult masks,
         CancellationToken cancellationToken)
     {
         var result = new HairGenerationResult
         {
+            Id = resultId,
             RequestId = request.Id,
+            BatchId = batchId,
+            ParentResultId = parentResultId,
+            SourcePath = request.SourcePath,
             OutputPath = outputPath,
+            ReferencePath = request.ReferencePath,
+            Settings = request.Settings,
+            Seed = seed,
             Model = model,
             Prompt = prompt,
+            StrengthPreset = options.StrengthPreset,
+            QualityPreset = options.QualityPreset,
+            HairMaskPath = masks.HairMaskPath,
+            FaceMaskPath = masks.FaceMaskPath,
+            EditMaskPath = masks.EditMaskPath,
             CompletedAt = DateTime.Now
         };
 
@@ -287,24 +374,31 @@ public sealed class HairGenerationService
             JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
 
-        AppLog.Write($"Local hairstyle result saved: {outputPath}");
+        AppLog.HairAi($"Local hairstyle result saved: {outputPath}");
         return result;
     }
 
-    private static string BuildGenerationPrompt(HairTryOnRequest request)
+    private static string BuildGenerationPrompt(
+        HairTryOnRequest request,
+        string? referenceGuidance)
     {
         var settings = request.Settings;
         var fringe = settings.Fringe.Equals("None", StringComparison.OrdinalIgnoreCase)
             ? "no fringe"
             : $"{settings.Fringe.ToLowerInvariant()} fringe";
 
+        var reference = string.IsNullOrWhiteSpace(referenceGuidance)
+            ? ""
+            : $", hairstyle reference guidance: {referenceGuidance}";
+
         return
-            "photorealistic portrait photo, same exact person and same face, " +
+            "photorealistic portrait photo, same exact person, same facial identity and same face, " +
             $"new {settings.StyleFamily.ToLowerInvariant()} hairstyle, " +
             $"{settings.Length.ToLowerInvariant()} length, {settings.Texture.ToLowerInvariant()} hair, " +
-            $"{fringe}, {settings.Volume.ToLowerInvariant()} volume, " +
-            "natural realistic hair strands, believable hairline, matching original lighting, " +
-            "keep eyes nose lips expression skin body clothing pose and background unchanged";
+            $"{fringe}, {settings.Volume.ToLowerInvariant()} volume{reference}, " +
+            "natural individual hair strands, believable hairline, realistic roots and flyaways, " +
+            "match the original camera angle and lighting, keep eyes eyebrows nose lips expression ears " +
+            "skin tone body clothing pose and background unchanged, change only the hair";
     }
 
     private static string LastUsefulLines(string text)
