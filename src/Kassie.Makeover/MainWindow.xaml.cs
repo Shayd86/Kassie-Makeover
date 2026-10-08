@@ -51,18 +51,38 @@ public partial class MainWindow : System.Windows.Window
         new("Blue", "#586FA8")
     ];
 
+    private static readonly ColorChoice[] HairColors =
+    [
+        new("Soft Black", "#252225"),
+        new("Espresso", "#3A2722"),
+        new("Chocolate", "#5A382A"),
+        new("Chestnut", "#754834"),
+        new("Copper", "#A95832"),
+        new("Auburn", "#7A342D"),
+        new("Honey Blonde", "#C79A58"),
+        new("Ash Blonde", "#B7AA91"),
+        new("Silver", "#A8A9AF"),
+        new("Pink", "#C85C91"),
+        new("Purple", "#76518E"),
+        new("Blue Black", "#26384B")
+    ];
+
     private readonly CameraService _camera = new();
     private readonly ModelAssetService _modelAssets = new();
     private readonly MakeupService _makeup = new();
     private readonly MakeupAdvisorService _advisor = new();
+    private readonly HairService _hair = new();
+    private readonly HairReferenceService _hairReferenceService = new();
     private readonly LookPresetService _lookService = new();
     private readonly WardrobeService _wardrobeService = new();
 
     private WriteableBitmap? _previewBitmap;
     private MakeupSettings _makeupSettings = new();
+    private HairSettings _hairSettings = new();
     private MakeupRecommendation? _lastRecommendation;
     private List<LookPreset> _looks = [];
     private List<WardrobeItem> _wardrobe = [];
+    private List<HairReference> _hairReferences = [];
     private string _activePage = "Live Mirror";
     private bool _closing;
     private bool _shutdownComplete;
@@ -81,6 +101,14 @@ public partial class MainWindow : System.Windows.Window
         EyeStyleCombo.ItemsSource = new[] { "Soft wash", "Soft smoky", "Outer lift" };
         StyleVibeCombo.ItemsSource = new[] { "Everyday", "Soft glam", "Evening", "Bold" };
 
+        HairColorCombo.ItemsSource = HairColors;
+        HairFinishCombo.ItemsSource = new[] { "Natural", "Glossy", "Matte" };
+        HairCoverageCombo.ItemsSource = new[] { "Full", "Roots", "Highlights" };
+        HairLengthCombo.ItemsSource = new[] { "Very short", "Short", "Medium", "Long", "Very long" };
+        HairTextureCombo.ItemsSource = new[] { "Straight", "Wavy", "Curly", "Coily" };
+        HairFringeCombo.ItemsSource = new[] { "None", "Soft", "Full", "Curtain", "Side" };
+        HairVolumeCombo.ItemsSource = new[] { "Low", "Natural", "High" };
+
         LipColorCombo.SelectedIndex = 0;
         BlushColorCombo.SelectedIndex = 0;
         EyeColorCombo.SelectedIndex = 0;
@@ -88,6 +116,14 @@ public partial class MainWindow : System.Windows.Window
         BlushPlacementCombo.SelectedItem = "Lifted";
         EyeStyleCombo.SelectedItem = "Soft wash";
         StyleVibeCombo.SelectedItem = "Everyday";
+
+        HairColorCombo.SelectedItem = HairColors.First(x => x.Name == "Chestnut");
+        HairFinishCombo.SelectedItem = "Natural";
+        HairCoverageCombo.SelectedItem = "Full";
+        HairLengthCombo.SelectedItem = "Medium";
+        HairTextureCombo.SelectedItem = "Wavy";
+        HairFringeCombo.SelectedItem = "None";
+        HairVolumeCombo.SelectedItem = "Natural";
 
         _camera.FrameProcessor = ProcessFrame;
         _camera.FrameReady += Camera_FrameReady;
@@ -97,6 +133,7 @@ public partial class MainWindow : System.Windows.Window
         Loaded += MainWindow_Loaded;
         _uiReady = true;
         UpdateMakeupSettings();
+        UpdateHairSettings();
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -109,6 +146,9 @@ public partial class MainWindow : System.Windows.Window
 
         _wardrobe = _wardrobeService.Load();
         RefreshWardrobe();
+
+        _hairReferences = _hairReferenceService.Load();
+        RefreshHairReferences();
 
         await RefreshCamerasAsync();
     }
@@ -165,6 +205,7 @@ public partial class MainWindow : System.Windows.Window
             await _camera.StartAsync(device.Index);
             CameraPlaceholder.Visibility = Visibility.Collapsed;
             MakeupCameraPlaceholder.Visibility = Visibility.Collapsed;
+            HairCameraPlaceholder.Visibility = Visibility.Collapsed;
             StartCameraButton.Content = "Restart camera";
         }
         catch (Exception ex)
@@ -180,9 +221,23 @@ public partial class MainWindow : System.Windows.Window
 
     private void ProcessFrame(Mat frame)
     {
-        var settings = _makeupSettings;
-        if (_activePage == "Makeup" && settings.Enabled && _makeup.Ready)
-            _makeup.Apply(frame, settings);
+        if (_activePage == "Makeup")
+        {
+            var makeup = _makeupSettings;
+            if (makeup.Enabled && _makeup.Ready)
+                _makeup.Apply(frame, makeup);
+            return;
+        }
+
+        if (_activePage == "Hair")
+        {
+            var hair = _hairSettings;
+            if (hair.Enabled && _makeup.Ready)
+            {
+                _makeup.Track(frame);
+                _hair.Apply(frame, hair, _makeup.GetTrackedFaceRect());
+            }
+        }
     }
 
     private void Camera_FrameReady(object? sender, CameraFrameEventArgs e)
@@ -198,8 +253,10 @@ public partial class MainWindow : System.Windows.Window
                 _previewBitmap.WritePixels(new Int32Rect(0, 0, e.Width, e.Height), e.Data, e.BufferSize, e.Stride);
                 PreviewImage.Source = _previewBitmap;
                 MakeupPreviewImage.Source = _previewBitmap;
+                HairPreviewImage.Source = _previewBitmap;
                 CameraPlaceholder.Visibility = Visibility.Collapsed;
                 MakeupCameraPlaceholder.Visibility = Visibility.Collapsed;
+                HairCameraPlaceholder.Visibility = Visibility.Collapsed;
             });
         }
         catch (TaskCanceledException) { }
@@ -220,6 +277,7 @@ public partial class MainWindow : System.Windows.Window
         SetCameraStatus(message);
         CameraPlaceholder.Visibility = Visibility.Visible;
         MakeupCameraPlaceholder.Visibility = Visibility.Visible;
+        HairCameraPlaceholder.Visibility = Visibility.Visible;
     }
 
     private async Task EnsureMakeupReadyAsync()
@@ -301,6 +359,79 @@ public partial class MainWindow : System.Windows.Window
         UpdateMakeupSettings();
     }
 
+    private void UpdateHairSettings()
+    {
+        if (!_uiReady) return;
+
+        var colour = HairColorCombo.SelectedItem as ColorChoice
+                     ?? HairColors.First(x => x.Name == "Chestnut");
+
+        _hairSettings = new HairSettings
+        {
+            Enabled = LiveHairCheck.IsChecked == true,
+            Intensity = (int)Math.Round(HairIntensitySlider.Value),
+            Color = colour.Hex,
+            Finish = HairFinishCombo.SelectedItem as string ?? "Natural",
+            Coverage = HairCoverageCombo.SelectedItem as string ?? "Full",
+            Length = HairLengthCombo.SelectedItem as string ?? "Medium",
+            Texture = HairTextureCombo.SelectedItem as string ?? "Wavy",
+            Fringe = HairFringeCombo.SelectedItem as string ?? "None",
+            Volume = HairVolumeCombo.SelectedItem as string ?? "Natural",
+            ReferencePath = _hairSettings.ReferencePath
+        };
+
+        HairIntensityText.Text = $"{_hairSettings.Intensity}%";
+        HairStyleSummary.Text =
+            $"{_hairSettings.Length} • {_hairSettings.Texture} • " +
+            $"{(_hairSettings.Fringe == "None" ? "No fringe" : _hairSettings.Fringe + " fringe")} • {_hairSettings.Volume} volume";
+
+        UpdateLooksSummary();
+    }
+
+    private void ApplyHairSettingsToUi(HairSettings settings)
+    {
+        _uiReady = false;
+        try
+        {
+            LiveHairCheck.IsChecked = settings.Enabled;
+            HairIntensitySlider.Value = settings.Intensity;
+            HairColorCombo.SelectedItem = HairColors.FirstOrDefault(x => x.Hex == settings.Color)
+                                          ?? HairColors.First(x => x.Name == "Chestnut");
+            HairFinishCombo.SelectedItem = settings.Finish;
+            HairCoverageCombo.SelectedItem = settings.Coverage;
+            HairLengthCombo.SelectedItem = settings.Length;
+            HairTextureCombo.SelectedItem = settings.Texture;
+            HairFringeCombo.SelectedItem = settings.Fringe;
+            HairVolumeCombo.SelectedItem = settings.Volume;
+            _hairSettings = settings;
+        }
+        finally
+        {
+            _uiReady = true;
+        }
+
+        UpdateHairSettings();
+
+        if (!string.IsNullOrWhiteSpace(settings.ReferencePath))
+        {
+            var matching = _hairReferences.FirstOrDefault(x =>
+                string.Equals(x.FilePath, settings.ReferencePath, StringComparison.OrdinalIgnoreCase));
+            if (matching is not null)
+                HairReferenceList.SelectedItem = matching;
+        }
+    }
+
+    private void RefreshHairReferences()
+    {
+        HairReferenceList.ItemsSource = null;
+        HairReferenceList.ItemsSource = _hairReferences.OrderByDescending(x => x.AddedAt).ToList();
+
+        if (string.IsNullOrWhiteSpace(_hairSettings.ReferencePath))
+            SelectedHairReferenceText.Text = _hairReferences.Count == 0
+                ? "No reference yet. Add a hairstyle photo you like."
+                : "Choose a reference and click Use selected.";
+    }
+
     private void RefreshLooks()
     {
         LooksList.ItemsSource = null;
@@ -312,7 +443,11 @@ public partial class MainWindow : System.Windows.Window
     {
         if (LooksSummary is null) return;
         var s = _makeupSettings;
-        LooksSummary.Text = $"Current makeup: {(s.Lipstick ? "lipstick" : "no lipstick")}, {(s.Blush ? "blush" : "no blush")}, {(s.Eyeshadow ? "eyeshadow" : "no eyeshadow")} • {s.Intensity}% intensity.\n\nSaved looks: {_looks.Count}.";
+        var h = _hairSettings;
+        LooksSummary.Text =
+            $"Current makeup: {(s.Lipstick ? "lipstick" : "no lipstick")}, {(s.Blush ? "blush" : "no blush")}, {(s.Eyeshadow ? "eyeshadow" : "no eyeshadow")} • {s.Intensity}% intensity.\n" +
+            $"Current hair: {h.Length}, {h.Texture}, {h.Color} • {h.Coverage.ToLowerInvariant()} colour at {h.Intensity}%.\n\n" +
+            $"Saved looks: {_looks.Count}.";
     }
 
     private void RefreshWardrobe()
@@ -434,10 +569,142 @@ public partial class MainWindow : System.Windows.Window
         GlobalStatus.Text = $"Trying {_lastRecommendation.Title}";
     }
 
+    private async void HairStartCamera_Click(object sender, RoutedEventArgs e)
+    {
+        await StartSelectedCameraAsync();
+        await EnsureHairTrackingReadyAsync();
+    }
+
+    private async Task EnsureHairTrackingReadyAsync()
+    {
+        if (!_makeup.Ready)
+            await EnsureMakeupReadyAsync();
+
+        HairTrackingStatus.Text = _makeup.Ready
+            ? "Face anchor ready • live hair mask is local"
+            : "Hair tracking could not start";
+        HairTrackingStatus.Foreground = (Brush)FindResource(_makeup.Ready ? "CyanBrush" : "PinkBrush");
+    }
+
+    private void HairMode_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string mode) return;
+
+        var style = mode == "Style";
+        HairColourPanel.Visibility = style ? Visibility.Collapsed : Visibility.Visible;
+        HairStylePanel.Visibility = style ? Visibility.Visible : Visibility.Collapsed;
+        HairModeHint.Text = style
+            ? "STYLE LAB • Build a haircut brief and add reference photos."
+            : "LIVE COLOUR • Fast camera tint for trying shades.";
+        HairModeHint.Foreground = (Brush)FindResource(style ? "PinkBrush" : "CyanBrush");
+    }
+
+    private void HairControl_Changed(object sender, RoutedEventArgs e) => UpdateHairSettings();
+
+    private void CaptureHair_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = _camera.SaveSnapshot();
+            GlobalStatus.Text = $"Saved {Path.GetFileName(path)}";
+        }
+        catch (Exception ex)
+        {
+            GlobalStatus.Text = ex.Message;
+        }
+    }
+
+    private void AddHairReference_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Add hairstyle references",
+            Filter = "Image files|*.jpg;*.jpeg;*.png;*.bmp",
+            Multiselect = true
+        };
+
+        if (dialog.ShowDialog(this) != true) return;
+
+        var imported = 0;
+        foreach (var file in dialog.FileNames)
+        {
+            try
+            {
+                _hairReferences.Add(_hairReferenceService.Import(file));
+                imported++;
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write($"Hair reference import failed for {file}: {ex}");
+            }
+        }
+
+        _hairReferences = _hairReferences.OrderByDescending(x => x.AddedAt).ToList();
+        _hairReferenceService.Save(_hairReferences);
+        RefreshHairReferences();
+        GlobalStatus.Text = imported == 1 ? "1 hair reference added" : $"{imported} hair references added";
+    }
+
+    private void UseHairReference_Click(object sender, RoutedEventArgs e)
+    {
+        if (HairReferenceList.SelectedItem is not HairReference item)
+        {
+            GlobalStatus.Text = "Choose a hair reference first";
+            return;
+        }
+
+        _hairSettings = _hairSettings with { ReferencePath = item.FilePath };
+        SelectedHairReferenceText.Text = $"Using: {item.Name}";
+        UpdateLooksSummary();
+        GlobalStatus.Text = $"Hair reference set to “{item.Name}”";
+    }
+
+    private void RemoveHairReference_Click(object sender, RoutedEventArgs e)
+    {
+        if (HairReferenceList.SelectedItem is not HairReference item)
+        {
+            GlobalStatus.Text = "Choose a hair reference first";
+            return;
+        }
+
+        _hairReferenceService.Delete(item);
+        _hairReferences.RemoveAll(x => x.Id == item.Id);
+        _hairReferenceService.Save(_hairReferences);
+
+        if (string.Equals(_hairSettings.ReferencePath, item.FilePath, StringComparison.OrdinalIgnoreCase))
+            _hairSettings = _hairSettings with { ReferencePath = null };
+
+        RefreshHairReferences();
+        GlobalStatus.Text = $"Removed “{item.Name}”";
+    }
+
+    private void HairReferenceList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (HairReferenceList.SelectedItem is HairReference item)
+        {
+            var inUse = string.Equals(_hairSettings.ReferencePath, item.FilePath, StringComparison.OrdinalIgnoreCase);
+            SelectedHairReferenceText.Text = inUse
+                ? $"Using: {item.Name}"
+                : $"Selected: {item.Name} • click Use selected to attach it to this look";
+        }
+    }
+
+    private void OpenHairFolder_Click(object sender, RoutedEventArgs e)
+    {
+        AppPaths.Ensure();
+        Process.Start(new ProcessStartInfo("explorer.exe", AppPaths.Hair) { UseShellExecute = true });
+    }
+
     private void SaveLook_Click(object sender, RoutedEventArgs e)
     {
         var name = string.IsNullOrWhiteSpace(LookNameBox.Text) ? $"Look {_looks.Count + 1}" : LookNameBox.Text.Trim();
-        _looks.Add(new LookPreset { Name = name, Makeup = _makeupSettings, CreatedAt = DateTime.Now });
+        _looks.Add(new LookPreset
+        {
+            Name = name,
+            Makeup = _makeupSettings,
+            Hair = _hairSettings,
+            CreatedAt = DateTime.Now
+        });
         _lookService.Save(_looks);
         RefreshLooks();
         GlobalStatus.Text = $"Saved “{name}”";
@@ -446,7 +713,7 @@ public partial class MainWindow : System.Windows.Window
     private void LooksList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (LooksList.SelectedItem is LookPreset look)
-            LooksSummary.Text = $"“{look.Name}” • {look.Makeup.Intensity}% makeup intensity • saved {look.CreatedAt:g}";
+            LooksSummary.Text = $"“{look.Name}” • {look.Makeup.Intensity}% makeup • {look.Hair.Length} {look.Hair.Texture.ToLowerInvariant()} hair • saved {look.CreatedAt:g}";
         else
             UpdateLooksSummary();
     }
@@ -460,9 +727,10 @@ public partial class MainWindow : System.Windows.Window
         }
 
         ApplyMakeupSettingsToUi(look.Makeup);
+        ApplyHairSettingsToUi(look.Hair ?? new HairSettings());
         ShowPage("Makeup");
         await EnsureMakeupReadyAsync();
-        GlobalStatus.Text = $"Loaded “{look.Name}”";
+        GlobalStatus.Text = $"Loaded “{look.Name}” • makeup and hair restored";
     }
 
     private void DeleteLook_Click(object sender, RoutedEventArgs e)
@@ -533,6 +801,8 @@ public partial class MainWindow : System.Windows.Window
 
         if (page == "Makeup")
             await EnsureMakeupReadyAsync();
+        else if (page == "Hair")
+            await EnsureHairTrackingReadyAsync();
     }
 
     private void ShowPage(string page)
@@ -542,9 +812,10 @@ public partial class MainWindow : System.Windows.Window
 
         LivePage.Visibility = page == "Live Mirror" ? Visibility.Visible : Visibility.Collapsed;
         MakeupPage.Visibility = page == "Makeup" ? Visibility.Visible : Visibility.Collapsed;
+        HairPage.Visibility = page == "Hair" ? Visibility.Visible : Visibility.Collapsed;
         LooksPage.Visibility = page == "Looks" ? Visibility.Visible : Visibility.Collapsed;
         WardrobePage.Visibility = page == "Wardrobe" ? Visibility.Visible : Visibility.Collapsed;
-        PlaceholderPage.Visibility = page is "Hair" or "Outfit" ? Visibility.Visible : Visibility.Collapsed;
+        PlaceholderPage.Visibility = page == "Outfit" ? Visibility.Visible : Visibility.Collapsed;
 
         switch (page)
         {
@@ -563,10 +834,8 @@ public partial class MainWindow : System.Windows.Window
                 RefreshWardrobe();
                 break;
             case "Hair":
-                PageSubtitle.Text = "Colour, cut and hairstyle previews.";
-                PlaceholderIcon.Text = "⌁";
-                PlaceholderTitle.Text = "Hair";
-                PlaceholderText.Text = "Hair colour preview and AI hairstyle renders are the next visual feature layer after this makeup build.";
+                PageSubtitle.Text = "Try colour live and build hairstyle briefs with references.";
+                RefreshHairReferences();
                 break;
             case "Outfit":
                 PageSubtitle.Text = "Live and photo outfit try-on.";
