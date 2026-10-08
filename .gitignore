@@ -1,0 +1,9 @@
+bin/
+obj/
+publish/
+installer/output/
+src/Kassie.Makeover/Assets/app.ico
+src/Kassie.Makeover/Assets/kassie-makeover-approved.jpg
+*.user
+*.suo
+.vs/
