@@ -143,31 +143,44 @@ public sealed class MakeupService : IDisposable
 
     private static void DrawBlush(Mat frame, Rect face, Scalar color, double alpha)
     {
-        using var overlay = frame.Clone();
         var y = face.Y + (int)(face.Height * 0.62);
-        var left = new Point(face.X + (int)(face.Width * 0.28), y);
-        var right = new Point(face.X + (int)(face.Width * 0.72), y);
+        var centers = new[]
+        {
+            new Point(face.X + (int)(face.Width * 0.28), y),
+            new Point(face.X + (int)(face.Width * 0.72), y)
+        };
         var axes = new Size(Math.Max(6, (int)(face.Width * 0.13)), Math.Max(4, (int)(face.Height * 0.075)));
 
-        Cv2.Ellipse(overlay, left, axes, -8, 0, 360, color, -1, LineTypes.AntiAlias);
-        Cv2.Ellipse(overlay, right, axes, 8, 0, 360, color, -1, LineTypes.AntiAlias);
-        Cv2.GaussianBlur(overlay, overlay, new Size(0, 0), Math.Max(2.0, face.Width * 0.025));
-        Cv2.AddWeighted(overlay, alpha, frame, 1.0 - alpha, 0, frame);
+        foreach (var center in centers)
+        {
+            var roi = Clamp(new Rect(center.X - axes.Width * 2, center.Y - axes.Height * 2,
+                axes.Width * 4, axes.Height * 4), frame.Width, frame.Height);
+
+            using var target = new Mat(frame, roi);
+            using var overlay = target.Clone();
+            var local = new Point(center.X - roi.X, center.Y - roi.Y);
+            Cv2.Ellipse(overlay, local, axes, 0, 0, 360, color, -1, LineTypes.AntiAlias);
+            Cv2.GaussianBlur(overlay, overlay, new Size(0, 0), Math.Max(1.2, face.Width * 0.012));
+            Cv2.AddWeighted(overlay, alpha, target, 1.0 - alpha, 0, target);
+        }
     }
 
     private static void DrawEyeshadow(Mat frame, IReadOnlyList<Rect> eyes, Scalar color, double alpha)
     {
-        using var overlay = frame.Clone();
-
         foreach (var eye in eyes)
         {
             var center = new Point(eye.X + eye.Width / 2, eye.Y + (int)(eye.Height * 0.36));
             var axes = new Size(Math.Max(5, (int)(eye.Width * 0.62)), Math.Max(3, (int)(eye.Height * 0.46)));
-            Cv2.Ellipse(overlay, center, axes, 0, 190, 350, color, -1, LineTypes.AntiAlias);
-        }
+            var roi = Clamp(new Rect(center.X - axes.Width - 5, center.Y - axes.Height - 5,
+                axes.Width * 2 + 10, axes.Height * 2 + 10), frame.Width, frame.Height);
 
-        Cv2.GaussianBlur(overlay, overlay, new Size(0, 0), 4.0);
-        Cv2.AddWeighted(overlay, alpha, frame, 1.0 - alpha, 0, frame);
+            using var target = new Mat(frame, roi);
+            using var overlay = target.Clone();
+            var local = new Point(center.X - roi.X, center.Y - roi.Y);
+            Cv2.Ellipse(overlay, local, axes, 0, 190, 350, color, -1, LineTypes.AntiAlias);
+            Cv2.GaussianBlur(overlay, overlay, new Size(0, 0), 2.2);
+            Cv2.AddWeighted(overlay, alpha, target, 1.0 - alpha, 0, target);
+        }
     }
 
     private static void DrawLipstick(Mat frame, Rect face, Rect? detectedMouth, Scalar color, double alpha)
@@ -178,16 +191,21 @@ public sealed class MakeupService : IDisposable
             (int)(face.Width * 0.42),
             Math.Max(8, (int)(face.Height * 0.12)));
 
-        using var overlay = frame.Clone();
-        var cx = mouth.X + mouth.Width / 2;
-        var cy = mouth.Y + mouth.Height / 2;
+        var padded = Clamp(new Rect(mouth.X - 4, mouth.Y - 4, mouth.Width + 8, mouth.Height + 8),
+            frame.Width, frame.Height);
+
+        using var target = new Mat(frame, padded);
+        using var overlay = target.Clone();
+
+        var cx = mouth.X + mouth.Width / 2 - padded.X;
+        var cy = mouth.Y + mouth.Height / 2 - padded.Y;
         var topAxes = new Size(Math.Max(6, mouth.Width / 2), Math.Max(2, mouth.Height / 3));
         var bottomAxes = new Size(Math.Max(6, mouth.Width / 2), Math.Max(2, (int)(mouth.Height * 0.42)));
 
         Cv2.Ellipse(overlay, new Point(cx, cy - 1), topAxes, 0, 180, 360, color, -1, LineTypes.AntiAlias);
         Cv2.Ellipse(overlay, new Point(cx, cy + 1), bottomAxes, 0, 0, 180, color, -1, LineTypes.AntiAlias);
-        Cv2.GaussianBlur(overlay, overlay, new Size(0, 0), 1.2);
-        Cv2.AddWeighted(overlay, alpha, frame, 1.0 - alpha, 0, frame);
+        Cv2.GaussianBlur(overlay, overlay, new Size(0, 0), 0.8);
+        Cv2.AddWeighted(overlay, alpha, target, 1.0 - alpha, 0, target);
     }
 
     private static Scalar ParseHex(string hex)
