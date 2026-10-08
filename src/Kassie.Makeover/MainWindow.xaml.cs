@@ -65,6 +65,7 @@ public partial class MainWindow : System.Windows.Window
     private List<WardrobeItem> _wardrobe = [];
     private string _activePage = "Live Mirror";
     private bool _closing;
+    private bool _shutdownComplete;
     private bool _uiReady;
     private bool _makeupLoading;
 
@@ -589,10 +590,39 @@ public partial class MainWindow : System.Windows.Window
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
     private void ToggleMaximize() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
-    private void Window_Closing(object? sender, CancelEventArgs e)
+    private async void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (_shutdownComplete)
+            return;
+
+        // Keep WPF's dispatcher alive while the camera thread is shutting down.
+        // The preview thread can be inside Dispatcher.Invoke; blocking the UI
+        // here with synchronous Dispose() can leave that thread and the webcam
+        // handle alive after the visible window has gone.
+        e.Cancel = true;
+
+        if (_closing)
+            return;
+
         _closing = true;
-        try { _camera.Dispose(); } catch { }
+        GlobalStatus.Text = "Closing camera…";
+        AppLog.Camera("Window close requested. Waiting for camera shutdown before closing WPF.");
+
+        try
+        {
+            _camera.FrameProcessor = null;
+            await _camera.StopAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Camera($"Camera shutdown during window close failed: {ex}");
+        }
+
+        try { _camera.Dispose(); } catch (Exception ex) { AppLog.Camera($"Camera dispose fallback failed: {ex.Message}"); }
         try { _makeup.Dispose(); } catch { }
+
+        _shutdownComplete = true;
+        AppLog.Camera("Camera shutdown complete. Closing WPF window.");
+        Close();
     }
 }
