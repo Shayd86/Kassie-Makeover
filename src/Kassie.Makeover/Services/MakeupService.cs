@@ -17,9 +17,7 @@ public sealed class MakeupService : IDisposable
     private int _frameCounter;
     private bool _disposed;
 
-    public bool Ready => _face is not null && !_face.Empty()
-                         && _eyes is not null && !_eyes.Empty()
-                         && _smile is not null && !_smile.Empty();
+    public bool Ready => _face is not null && _eyes is not null && _smile is not null;
 
     public void Initialize()
     {
