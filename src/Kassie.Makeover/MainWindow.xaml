@@ -281,6 +281,163 @@
                         </ScrollViewer>
                     </Grid>
 
+                    <Grid x:Name="HairPage" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3*"/>
+                            <ColumnDefinition Width="400"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0" Background="#050711" BorderBrush="#244A50" BorderThickness="1" CornerRadius="14" Margin="0,0,16,0" ClipToBounds="True">
+                            <Grid>
+                                <Image x:Name="HairPreviewImage" Stretch="Uniform" SnapsToDevicePixels="True"/>
+                                <StackPanel x:Name="HairCameraPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <TextBlock Text="⌁" Foreground="{StaticResource CyanBrush}" FontSize="54" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="Hair mirror" Foreground="#D9F7FA" FontSize="18" HorizontalAlignment="Center" Margin="0,12,0,0"/>
+                                    <TextBlock Text="Start the camera for live colour, or build a hairstyle brief." Foreground="#697D82" FontSize="12" HorizontalAlignment="Center" Margin="0,6,0,12"/>
+                                    <Button Content="Start camera" Style="{StaticResource ActionButton}" Click="HairStartCamera_Click"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Border Background="{StaticResource PanelBrush}" BorderBrush="#28515A" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                                    <StackPanel>
+                                        <TextBlock Text="Hair mode" FontSize="17" FontWeight="Bold"/>
+                                        <TextBlock Text="Use a quick live colour preview, or build the style brief that our higher-quality hair renderer will use." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,10" FontSize="11"/>
+                                        <WrapPanel Margin="-4,0">
+                                            <Button Content="Live Colour" Tag="Colour" Style="{StaticResource ActionButton}" Click="HairMode_Click"/>
+                                            <Button Content="Style Lab" Tag="Style" Style="{StaticResource ActionButton}" Click="HairMode_Click"/>
+                                        </WrapPanel>
+                                        <TextBlock x:Name="HairModeHint" Text="LIVE COLOUR • Fast camera tint for trying shades." Foreground="{StaticResource CyanBrush}" Margin="4,8,0,0" FontSize="11"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <StackPanel x:Name="HairColourPanel">
+                                    <Border Background="{StaticResource PanelBrush}" BorderBrush="#28515A" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <TextBlock Text="Live Hair Colour  •  Beta" FontSize="17" FontWeight="Bold"/>
+                                            <TextBlock Text="This is a fast local preview. It keeps your real hair texture, but the mask is deliberately conservative until the proper hair-segmentation model lands." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" FontSize="11"/>
+                                            <CheckBox x:Name="LiveHairCheck" Content="Enable live hair colour" IsChecked="True" Foreground="White" Margin="0,4" Checked="HairControl_Changed" Unchecked="HairControl_Changed"/>
+                                            <TextBlock x:Name="HairTrackingStatus" Text="Face/hair tracking not loaded yet" Foreground="{StaticResource PinkBrush}" TextWrapping="Wrap" Margin="0,8,0,10" FontSize="11"/>
+                                            <WrapPanel Margin="-4,0">
+                                                <Button Content="Capture hair preview" Style="{StaticResource ActionButton}" Click="CaptureHair_Click"/>
+                                                <Button Content="Open captures" Style="{StaticResource ActionButton}" Click="OpenOutputs_Click"/>
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="{StaticResource PanelBrush}" BorderBrush="#2A3053" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <TextBlock Text="Colour strength" FontSize="15" FontWeight="Bold"/>
+                                            <Slider x:Name="HairIntensitySlider" Minimum="0" Maximum="100" Value="32" TickFrequency="5" Margin="0,8,0,0" ValueChanged="HairControl_Changed"/>
+                                            <TextBlock x:Name="HairIntensityText" Text="32%" Foreground="{StaticResource CyanBrush}" HorizontalAlignment="Right"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="{StaticResource PanelBrush}" BorderBrush="#2A3053" BorderThickness="1" CornerRadius="12" Padding="16">
+                                        <StackPanel>
+                                            <TextBlock Text="Colour" FontSize="15" FontWeight="Bold"/>
+                                            <TextBlock Text="Shade" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,8,0,4"/>
+                                            <ComboBox x:Name="HairColorCombo" MinHeight="32" SelectionChanged="HairControl_Changed"/>
+                                            <Grid Margin="0,10,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="10"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="Finish" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                                    <ComboBox x:Name="HairFinishCombo" MinHeight="32" SelectionChanged="HairControl_Changed"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="Coverage" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                                    <ComboBox x:Name="HairCoverageCombo" MinHeight="32" SelectionChanged="HairControl_Changed"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel x:Name="HairStylePanel" Visibility="Collapsed">
+                                    <Border Background="{StaticResource PanelBrush}" BorderBrush="#512E56" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <TextBlock Text="Style Lab" FontSize="18" FontWeight="Bold"/>
+                                            <TextBlock Text="Build the haircut/hairstyle request separately from colour. These choices and a reference image are saved now, ready for the still-image hair renderer." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,12" FontSize="11"/>
+
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="10"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="Length" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                                    <ComboBox x:Name="HairLengthCombo" MinHeight="32" SelectionChanged="HairControl_Changed"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="Texture" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                                    <ComboBox x:Name="HairTextureCombo" MinHeight="32" SelectionChanged="HairControl_Changed"/>
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <Grid Margin="0,10,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="10"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="Fringe" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                                    <ComboBox x:Name="HairFringeCombo" MinHeight="32" SelectionChanged="HairControl_Changed"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="Volume" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                                    <ComboBox x:Name="HairVolumeCombo" MinHeight="32" SelectionChanged="HairControl_Changed"/>
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <TextBlock x:Name="HairStyleSummary" Text="Medium • Wavy • No fringe • Natural volume" Foreground="{StaticResource CyanBrush}" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="{StaticResource PanelBrush}" BorderBrush="#2A3053" BorderThickness="1" CornerRadius="12" Padding="16">
+                                        <StackPanel>
+                                            <TextBlock Text="Reference hairstyles" FontSize="16" FontWeight="Bold"/>
+                                            <TextBlock Text="Add photos you like. The selected reference becomes part of the current hair look." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,10" FontSize="11"/>
+                                            <WrapPanel Margin="-4,0,0,8">
+                                                <Button Content="+ Add reference" Style="{StaticResource ActionButton}" Click="AddHairReference_Click"/>
+                                                <Button Content="Use selected" Style="{StaticResource ActionButton}" Click="UseHairReference_Click"/>
+                                                <Button Content="Remove" Style="{StaticResource ActionButton}" Click="RemoveHairReference_Click"/>
+                                            </WrapPanel>
+                                            <ListBox x:Name="HairReferenceList" Height="220" Background="#080A14" BorderBrush="#2B3152" SelectionChanged="HairReferenceList_SelectionChanged">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="4">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="62"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Width="54" Height="54" Background="#050711" CornerRadius="6" ClipToBounds="True">
+                                                                <Image Source="{Binding FilePath}" Stretch="UniformToFill"/>
+                                                            </Border>
+                                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+                                                                <TextBlock Text="{Binding Name}" Foreground="#E7EAF8" TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding AddedAt, StringFormat='Added {0:d}'}" Foreground="#747C9B" FontSize="10"/>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <TextBlock x:Name="SelectedHairReferenceText" Text="No reference selected" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11"/>
+                                            <Button Content="Open hair folder" Style="{StaticResource ActionButton}" Margin="0,8,0,0" Click="OpenHairFolder_Click"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
                     <Grid x:Name="LooksPage" Visibility="Collapsed">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="420"/>
@@ -290,7 +447,7 @@
                         <Border Background="{StaticResource PanelBrush}" BorderBrush="#2A3053" BorderThickness="1" CornerRadius="14" Padding="20" Margin="0,0,16,0">
                             <StackPanel>
                                 <TextBlock Text="Save current look" FontSize="18" FontWeight="Bold"/>
-                                <TextBlock Text="For now a Look stores your live makeup choices. Hair and outfit settings will join the same preset system as those tools come online." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,14"/>
+                                <TextBlock Text="A Look now stores your makeup and hair choices together. Outfit settings will join the same preset system when try-on lands." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,14"/>
                                 <TextBox x:Name="LookNameBox" Height="34" Padding="8,5" Text="My look"/>
                                 <Button Content="Save current makeup as look" Style="{StaticResource ActionButton}" Margin="0,10,0,0" Click="SaveLook_Click"/>
                                 <Separator Margin="0,14"/>
