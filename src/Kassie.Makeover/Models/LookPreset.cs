@@ -6,4 +6,5 @@ public sealed class LookPreset
     public string Name { get; set; } = "Untitled look";
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public MakeupSettings Makeup { get; set; } = new();
+    public HairSettings Hair { get; set; } = new();
 }
