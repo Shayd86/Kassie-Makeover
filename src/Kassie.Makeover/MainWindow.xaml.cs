@@ -336,6 +336,19 @@ public partial class MainWindow : Window
 
     private async void MakeupStartCamera_Click(object sender, RoutedEventArgs e) => await StartSelectedCameraAsync();
 
+    private void CaptureMakeup_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = _camera.SaveSnapshot();
+            GlobalStatus.Text = $"Saved {Path.GetFileName(path)}";
+        }
+        catch (Exception ex)
+        {
+            GlobalStatus.Text = ex.Message;
+        }
+    }
+
     private void MakeupControl_Changed(object sender, RoutedEventArgs e) => UpdateMakeupSettings();
 
     private void SaveLook_Click(object sender, RoutedEventArgs e)
