@@ -219,6 +219,9 @@ public sealed class CameraService : IDisposable
     }
 
     public string SaveSnapshot()
+        => SaveSnapshotTo(AppPaths.Outputs, "Kassie-Makeover");
+
+    public string SaveSnapshotTo(string directory, string prefix)
     {
         ThrowIfDisposed();
         Mat? snapshot;
@@ -230,8 +233,9 @@ public sealed class CameraService : IDisposable
 
         using (snapshot)
         {
-            Directory.CreateDirectory(AppPaths.Outputs);
-            var path = Path.Combine(AppPaths.Outputs, $"Kassie-Makeover-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+            Directory.CreateDirectory(directory);
+            var safePrefix = string.Concat(prefix.Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '-' : ch));
+            var path = Path.Combine(directory, $"{safePrefix}-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.png");
             if (!Cv2.ImWrite(path, snapshot))
                 throw new IOException("The snapshot could not be written to disk.");
             AppLog.Camera($"Snapshot saved: {path}");
