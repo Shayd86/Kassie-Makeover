@@ -15,7 +15,7 @@ using Kassie.Makeover.Services;
 
 namespace Kassie.Makeover;
 
-public partial class MainWindow : Window
+public partial class MainWindow : System.Windows.Window
 {
     private sealed record ColorChoice(string Name, string Hex)
     {
