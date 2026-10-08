@@ -17,13 +17,15 @@ public static class AppPaths
     public static string HairInputs => Path.Combine(Hair, "inputs");
     public static string HairOutputs => Path.Combine(Hair, "outputs");
     public static string HairRequests => Path.Combine(Hair, "requests");
+    public static string HairHistory => Path.Combine(Hair, "history");
+    public static string HairHistoryIndex => Path.Combine(HairHistory, "history.json");
     public static string HairModels => Path.Combine(Models, "hair");
     public static string Config => Path.Combine(Root, "config");
     public static string Logs => Path.Combine(Root, "logs");
 
     public static void Ensure()
     {
-        foreach (var path in new[] { Root, Models, Runtimes, Cache, Temp, Outputs, Exports, Wardrobe, Hair, HairReferences, HairInputs, HairOutputs, HairRequests, HairModels, Config, Logs })
+        foreach (var path in new[] { Root, Models, Runtimes, Cache, Temp, Outputs, Exports, Wardrobe, Hair, HairReferences, HairInputs, HairOutputs, HairRequests, HairHistory, HairModels, Config, Logs })
             Directory.CreateDirectory(path);
     }
 }
@@ -47,12 +49,22 @@ public static class AppLog
 
     public static void Camera(string message)
     {
+        WriteNamed("camera.log", message);
+    }
+
+    public static void HairAi(string message)
+    {
+        WriteNamed("hair-ai.log", message);
+    }
+
+    private static void WriteNamed(string fileName, string message)
+    {
         try
         {
             lock (Gate)
             {
                 Directory.CreateDirectory(AppPaths.Logs);
-                File.AppendAllText(Path.Combine(AppPaths.Logs, "camera.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}{Environment.NewLine}");
+                File.AppendAllText(Path.Combine(AppPaths.Logs, fileName), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}{Environment.NewLine}");
             }
         }
         catch { }
